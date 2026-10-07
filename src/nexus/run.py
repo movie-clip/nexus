@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, get_type_hints
 
+from dotenv import load_dotenv
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
@@ -37,6 +38,7 @@ log = logging.getLogger("nexus.run")
 
 RESERVED = frozenset(get_type_hints(BaseState))
 CONFIG_FILE = Path("langgraph.json")
+NEXUS_ROOT = Path(__file__).resolve().parents[2]
 EXIT_OK, EXIT_RUN_ERRORS, EXIT_FAILED = 0, 1, 3
 RETRY_LOGGER = "langgraph.pregel._retry"
 
@@ -153,6 +155,14 @@ def run_pipeline(
 # --- CLI --------------------------------------------------------------------
 
 
+def load_env() -> None:
+    """Load secrets (ANTHROPIC_API_KEY, ...) from nexus's git-ignored .env.
+
+    Variables already set in the environment win over the file.
+    """
+    load_dotenv(NEXUS_ROOT / ".env", override=False)
+
+
 class OneLineRetries(logging.Filter):
     """LangGraph logs every retry with a full traceback; keep each to one line."""
 
@@ -191,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--set", dest="sets", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, handlers=[log_handler()])
+    load_env()
 
     thread_id = args.thread or f"{args.pipeline}-{datetime.now():%Y%m%dT%H%M%S}"
     try:

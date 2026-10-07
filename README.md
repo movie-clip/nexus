@@ -1,8 +1,32 @@
 # nexus
 
-Pipelines built on LangGraph that you start by hand and that run to the end on
-their own, with retries, clear failure reports and (soon) resume.
-Background: `research/langgraph-standalone-app.md`. What "done" means: `DONE.md`.
+An engineering assistant built on LangGraph and Deep Agents. You send it a
+request in plain text about a project; agents explore the project and answer.
+You start every run by hand. Background: `research/langgraph-standalone-app.md`.
+What "done" means: `DONE.md`.
+
+## Ask
+
+```sh
+# once: put your key in nexus's .env (git-ignored)
+echo ANTHROPIC_API_KEY=sk-ant-... > .env
+
+uv run python -m nexus "how does the character controller handle jumping?" --project C:\projects\impact
+```
+
+The answer is printed as Markdown; progress, the thread id and the run's cost
+in US dollars go to stderr. `--json` prints the full result instead.
+
+Today this is one **read-only** Deep Agent (`pipelines/ask.py`, Claude Opus 5.5):
+it can list, read, glob and grep inside `--project` and nothing else. Write
+tools are not offered, writes are denied by permission rules anyway, paths
+outside the project are blocked, `.env` files are unreadable, and there is no
+shell. The project's own `AGENTS.md` / `CLAUDE.md` are loaded when present.
+
+LangGraph and Deep Agents are free and open source; the Claude API calls are
+billed per token to your key. Install [ripgrep](https://github.com/BurntSushi/ripgrep)
+(`winget install BurntSushi.ripgrep.MSVC`) so searches are fast and skip
+`.gitignore`d folders.
 
 The layout follows LangGraph's [application structure](https://docs.langchain.com/oss/python/langgraph/application-structure):
 each pipeline is a module exporting a compiled `graph`, listed in `langgraph.json`.
@@ -10,10 +34,11 @@ The same graphs work in two ways:
 
 | | Command | Use it for |
 |---|---|---|
-| **Run** | `uv run python -m nexus.run --pipeline <name>` | doing the work: one run, result as JSON |
+| **Ask** | `uv run python -m nexus "<request>" --project <path>` | a request in plain text |
+| **Run** | `uv run python -m nexus.run --pipeline <name>` | any pipeline, inputs via `--set`, result as JSON |
 | **Inspect** | `uv run langgraph dev` | developing: local API and Studio UI to watch and step through runs (in-memory, dev only) |
 
-## Run
+## Run any pipeline
 
 ```sh
 uv sync
@@ -41,9 +66,13 @@ langgraph.json    graph name -> ./src/nexus/pipelines/<module>.py:graph
 src/nexus/
   state.py        BaseState: errors, cost_usd, artifacts, retries, verdict
   retry.py        DEFAULT_RETRY (transient errors) and retry_update (capped "try again" routes)
+  models.py       Claude model defaults (effort, refusal fallbacks) and cost_usd from token usage
+  agents.py       shared Deep Agent pieces: read-only and no-secrets permissions, HideTools
+  __main__.py     `python -m nexus "<request>"`
   run.py          the CLI: loads a graph from langgraph.json, validates inputs, runs, reports
   errors.py       InputError
   pipelines/
+    ask.py        read-only Deep Agent that answers a request about --project
     smoke.py      the engine's own test pipeline: routing scenarios and failure drills
 tests/
 ```

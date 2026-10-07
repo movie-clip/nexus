@@ -2,6 +2,7 @@
   "$schema": "https://langgra.ph/schema.json",
   "dependencies": ["."],
   "graphs": {
+    "ask": "./src/nexus/pipelines/ask.py:graph",
     "smoke": "./src/nexus/pipelines/smoke.py:graph"
   }
 }

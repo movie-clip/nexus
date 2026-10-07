@@ -15,6 +15,9 @@ promise is proven by a test, not by a demo.
 | Pipelines follow LangGraph's application structure: every graph in `langgraph.json` loads in `nexus.run` and in `langgraph dev` | loading test; manual `langgraph dev` check | 2 |
 | A node that raises a transient error is retried with backoff, one log line per retry; programming errors are not retried | failure drills via the smoke pipeline's `fail_*` inputs | 2 |
 | A failed run returns `status=failed`, the failed node and the error as JSON, keeps the work finished before the failure, logs the traceback once, and exits 3 | failure-report tests, subprocess test | 2 |
+| `python -m nexus "<request>" --project P` answers about P, with cost in US dollars | ask pipeline test (scripted model); first live run | A |
+| The ask agent cannot change the project: no write tools offered, writes denied, traversal blocked, `.env` unreadable, no shell | agent permission tests (exact error per case) | A |
+| Cost counts every model call, including subagents and cache reads and writes; unknown models are never counted as free | cost tests | A |
 | A run survives a crash: resume continues, finished nodes are not run again | kill-and-resume test, counting node calls | 3 |
 | `run` refuses a thread id that already exists (no piling onto old state); only `resume` continues one | existing-thread test | 3 |
 | A human gate pauses the run with no side effects, and `resume --decision` finishes it | approve and reject scenario tests | 4 |
