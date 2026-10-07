@@ -17,11 +17,30 @@ uv run python -m nexus "how does the character controller handle jumping?" --pro
 The answer is printed as Markdown; progress, the thread id and the run's cost
 in US dollars go to stderr. `--json` prints the full result instead.
 
-Today this is one **read-only** Deep Agent (`pipelines/ask.py`, Claude Opus 5.5):
-it can list, read, glob and grep inside `--project` and nothing else. Write
-tools are not offered, writes are denied by permission rules anyway, paths
-outside the project are blocked, `.env` files are unreadable, and there is no
-shell. The project's own `AGENTS.md` / `CLAUDE.md` are loaded when present.
+By default a **team** answers (`pipelines/team.py`):
+
+```
+request -> orchestrator -+- scout (Sonnet 5.5) ---+
+              ^          +- reviewer (Opus 5.5) --+-> report back
+              +----------+- finish -> answer
+```
+
+- The **orchestrator** (Opus 5.5, no file access) reads the request and every
+  report so far, and each round picks: send the scout or the reviewer a
+  self-contained brief, or finish with the answer. Its choice is JSON enforced
+  by the API's structured output; LangGraph routes on it in plain code, and
+  each decision and its reason is logged.
+- The **scout** finds what is actually in the repo; the **reviewer** checks a
+  draft or claims against the code. Each sees only its brief.
+- At most `--max-rounds` specialist rounds (default 4); when none are left the
+  only choice offered is "finish".
+- `--pipeline ask` uses a single agent instead (`pipelines/ask.py`).
+
+Every agent is **read-only**: it can list, read, glob and grep inside
+`--project` and nothing else. Write tools are not offered, writes are denied
+by permission rules anyway, paths outside the project are blocked, `.env`
+files are unreadable, and there is no shell. The project's own `AGENTS.md` /
+`CLAUDE.md` are loaded when present.
 
 LangGraph and Deep Agents are free and open source; the Claude API calls are
 billed per token to your key. Install [ripgrep](https://github.com/BurntSushi/ripgrep)
@@ -34,7 +53,7 @@ The same graphs work in two ways:
 
 | | Command | Use it for |
 |---|---|---|
-| **Ask** | `uv run python -m nexus "<request>" --project <path>` | a request in plain text |
+| **Ask** | `uv run python -m nexus "<request>" --project <path>` | a request in plain text (team by default) |
 | **Run** | `uv run python -m nexus.run --pipeline <name>` | any pipeline, inputs via `--set`, result as JSON |
 | **Inspect** | `uv run langgraph dev` | developing: local API and Studio UI to watch and step through runs (in-memory, dev only) |
 
@@ -67,12 +86,13 @@ src/nexus/
   state.py        BaseState: errors, cost_usd, artifacts, retries, verdict
   retry.py        DEFAULT_RETRY (transient errors) and retry_update (capped "try again" routes)
   models.py       Claude model defaults (effort, refusal fallbacks) and cost_usd from token usage
-  agents.py       shared Deep Agent pieces: read-only and no-secrets permissions, HideTools
+  agents.py       shared Deep Agent pieces: read_only_agent, permissions, HideTools, run_agent
   __main__.py     `python -m nexus "<request>"`
   run.py          the CLI: loads a graph from langgraph.json, validates inputs, runs, reports
   errors.py       InputError
   pipelines/
-    ask.py        read-only Deep Agent that answers a request about --project
+    team.py       orchestrator + scout + reviewer (default for `python -m nexus`)
+    ask.py        a single read-only Deep Agent
     smoke.py      the engine's own test pipeline: routing scenarios and failure drills
 tests/
 ```

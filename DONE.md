@@ -18,6 +18,10 @@ promise is proven by a test, not by a demo.
 | `python -m nexus "<request>" --project P` answers about P, with cost in US dollars | ask pipeline test (scripted model); first live run | A |
 | The ask agent cannot change the project: no write tools offered, writes denied, traversal blocked, `.env` unreadable, no shell | agent permission tests (exact error per case) | A |
 | Cost counts every model call, including subagents and cache reads and writes; unknown models are never counted as free | cost tests | A |
+| The orchestrator routes each round to scout, reviewer or finish, from structured output (no forced tool use) | team routing tests (scripted orchestrator) | B |
+| Specialists see only their brief; the orchestrator sees every brief and report | context isolation tests | B |
+| The round cap holds: with no rounds left, only "finish" is offered (verified against the live API) | round-cap tests; live schema call | B |
+| On the same question the team matches the single agent's answer quality at lower cost (live: $0.22 vs $0.34, both correct) | live comparison, 2026-10-07 | B |
 | A run survives a crash: resume continues, finished nodes are not run again | kill-and-resume test, counting node calls | 3 |
 | `run` refuses a thread id that already exists (no piling onto old state); only `resume` continues one | existing-thread test | 3 |
 | A human gate pauses the run with no side effects, and `resume --decision` finishes it | approve and reject scenario tests | 4 |
