@@ -94,6 +94,64 @@ def test_listings_show_the_project_as_it_was(backend):
     names = [entry["path"] for entry in backend.ls("/src").entries]
     assert any(n.endswith("A.cs") for n in names)
     assert not any(n.endswith("B.cs") for n in names)
+    assert [m["path"] for m in backend.glob("**/*.cs").matches] == ["/src/A.cs"]
+    assert [m["path"] for m in backend.grep("class B").matches] == []
+    assert [m["path"] for m in backend.grep("int x").matches] == ["/src/A.cs"]
+
+
+def test_reads_show_the_project_until_a_file_is_staged(backend):
+    assert backend.read("/README.md").file_data["content"] == "hello\n"
+    backend.write("/README.md", "bye\n")
+    assert backend.read("/README.md").file_data["content"] == "bye\n"
+
+
+def test_downloads_follow_the_same_view_as_reads(backend):
+    backend.write("/src/A.cs", "class A {}\n")
+    backend.delete("/README.md")
+    outside, staged, deleted = backend.download_files(["/../x", "/src/A.cs", "/README.md"])
+    assert staged.content is not None and b"class A {}" in staged.content
+    assert deleted.error == "file_not_found"
+    assert (outside.error, outside.content) == ("invalid_path", None)
+
+
+def test_uploads_are_refused(project, backend):
+    (response,) = backend.upload_files([("/new.bin", b"x")])
+    assert response.error == "permission_denied"
+    assert backend.changes() == [] and not (project / "new.bin").exists()
+
+
+def test_edit_whose_old_string_is_missing_changes_nothing(backend):
+    result = backend.edit("/src/A.cs", "int z = 9;", "int z = 0;")
+    assert result.error is not None and "not found" in result.error
+    assert backend.changes() == []
+
+
+@pytest.mark.parametrize(
+    ("path", "error"),
+    [
+        ("/../outside.txt", "Path traversal not allowed"),
+        ("/src", "is a directory"),
+        ("/nope.txt", "not found"),
+    ],
+)
+def test_bad_deletes_are_refused(backend, path, error):
+    result = backend.delete(path)
+    assert result.error is not None and error in result.error
+    assert backend.changes() == []
+
+
+def test_edit_outside_the_project_is_refused(backend, tmp_path):
+    (tmp_path / "outside.txt").write_text("a")
+    assert backend.edit("/../outside.txt", "a", "b").error is not None
+    assert (tmp_path / "outside.txt").read_text() == "a"
+    assert backend.changes() == []
+
+
+def test_deleted_file_can_be_written_again(backend):
+    backend.delete("/README.md")
+    assert backend.edit("/README.md", "hello", "x").error is not None  # gone for edits
+    backend.write("/README.md", "back\n")
+    assert backend.changes() == [Change("/README.md", "hello\n", "back\n")]
 
 
 # --- applying an approved batch -----------------------------------------------
@@ -185,7 +243,9 @@ def test_replay_of_the_real_mixed_ending_file_changes_only_the_edited_lines(tmp_
     )
     assert result.error is None
     before = original.decode().splitlines(keepends=True)
-    after = backend.changes()[0].after.splitlines(keepends=True)
+    staged = backend.changes()[0].after
+    assert staged is not None
+    after = staged.splitlines(keepends=True)
     changed_before = [line for line in before if line not in after]
     changed_after = [line for line in after if line not in before]
     assert [line.strip() for line in changed_before] == ["/// Is jump input active this frame?"]

@@ -4,6 +4,7 @@ import logging
 
 import pytest
 from langchain_core.messages import ToolMessage
+from langchain_core.messages.ai import UsageMetadata
 
 from nexus.errors import InputError
 from nexus.models import PRICES, UNKNOWN_PRICE, cost_usd
@@ -109,7 +110,7 @@ def test_pipeline_rejects_missing_project_before_any_model_call(tmp_path):
 
 
 def test_cost_counts_cache_reads_and_writes_at_their_own_rates():
-    usage = {
+    usage: dict[str, UsageMetadata] = {
         MODEL: {
             "input_tokens": 10_000,  # includes the cache tokens below
             "output_tokens": 1_000,
@@ -123,13 +124,21 @@ def test_cost_counts_cache_reads_and_writes_at_their_own_rates():
 
 
 def test_cost_matches_longest_model_id_first():
-    usage = {"input_tokens": 1_000_000, "output_tokens": 0, "total_tokens": 1_000_000}
+    usage: UsageMetadata = {
+        "input_tokens": 1_000_000,
+        "output_tokens": 0,
+        "total_tokens": 1_000_000,
+    }
     assert cost_usd({"claude-opus-5-5": usage}) == pytest.approx(4.00)
     assert cost_usd({"claude-opus-5": usage}) == pytest.approx(5.00)
 
 
 def test_unknown_model_is_priced_high_not_free(caplog):
-    usage = {"input_tokens": 0, "output_tokens": 1_000_000, "total_tokens": 1_000_000}
+    usage: UsageMetadata = {
+        "input_tokens": 0,
+        "output_tokens": 1_000_000,
+        "total_tokens": 1_000_000,
+    }
     with caplog.at_level(logging.WARNING, logger="nexus.models"):
         assert cost_usd({"claude-mystery-9": usage}) == pytest.approx(UNKNOWN_PRICE.output)
     assert "claude-mystery-9" in caplog.text

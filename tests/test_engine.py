@@ -8,6 +8,7 @@ from nexus.errors import InputError
 from nexus.pipelines import smoke
 from nexus.retry import GIVE_UP, RETRY, retry_update
 from nexus.run import graph_specs, load_graph, main, parse_sets, run_pipeline
+from nexus.state import BaseState
 from tests.conftest import ROOT
 
 
@@ -21,7 +22,7 @@ def test_retry_update_bumps_until_limit():
 
 
 def test_retry_counts_are_per_node():
-    state = {"retries": {"verify": 2}}
+    state: BaseState = {"retries": {"verify": 2}}
     assert retry_update(state, 2, "fetch") == {"verdict": RETRY, "retries": {"fetch": 1}}
 
 
@@ -110,3 +111,32 @@ def test_cli_bad_arguments_are_usage_errors(in_repo_root, capsys, argv, message)
         main(argv)
     assert exc.value.code == 2
     assert message in capsys.readouterr().err
+
+
+def test_graph_files_outside_the_package_load_and_bad_ones_are_refused(tmp_path):
+    (tmp_path / "flow.py").write_text(
+        "from nexus.pipelines import smoke\ngraph = smoke.build().compile(name='outside')\n"
+    )
+    (tmp_path / "flow.txt").write_text("")
+    config = tmp_path / "langgraph.json"
+    config.write_text(
+        json.dumps({"graphs": {"good": "./flow.py:graph", "bad": "./flow.txt:graph"}})
+    )
+    assert load_graph("good", config).get_name() == "outside"
+    with pytest.raises(InputError, match="can't import"):
+        load_graph("bad", config)
+
+
+def test_pipelines_must_declare_their_inputs():
+    from typing import TypedDict
+
+    from langgraph.graph import START, StateGraph
+
+    class S(TypedDict):
+        n: int
+
+    builder = StateGraph(S)
+    builder.add_node("a", lambda s: s)
+    builder.add_edge(START, "a")
+    with pytest.raises(InputError, match="must declare input_schema"):
+        run_pipeline(builder.compile(), "t", {"n": 1})

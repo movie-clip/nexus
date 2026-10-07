@@ -121,6 +121,7 @@ def test_find_config_matches_the_project_folder(tmp_path, project, config):
         ('[commands.Bad_Name]\ndescription="d"\nrun=["a"]', "command name"),
         ('[commands.x]\ndescription="d"\nrun=["a"]\nshell=true', "Extra inputs"),
         ('[commands.x]\ndescription="d"\nrun=["a"]\napproval="never"', "approval"),
+        ('[commands.x]\ndescription="d"\nrun=["a"]\nparams.p={pattern="("}', "bad pattern"),
     ],
 )
 def test_bad_configs_are_refused(tmp_path, project, body, error):
@@ -236,7 +237,8 @@ def test_nunit_results_are_summarized(config, project, tmp_path):
     assert "Tests: 3 run, 1 passed, 2 failed, 0 skipped" in report
     assert "FAILED A.Tests.Breaks: Expected 2 | But was 3" in report
     assert "FAILED A.Tests.Throws: NullReferenceException" in report
-    assert "Passes" not in commands.nunit_summary(Path(cmd.results_file))
+    summary = commands.nunit_summary(Path(cmd.results_file))
+    assert summary is not None and "Passes" not in summary
 
 
 def test_a_stale_results_file_is_never_reported(config, project, tmp_path):
@@ -325,3 +327,65 @@ def test_output_tail_is_short_on_success_and_long_on_failure(tmp_path):
     failed = commands.summarize(cmd, Outcome(1, 1, 1), [])
     assert "Last 10 lines of output:" in ok and "line 89" not in ok and "line 90" in ok
     assert "Last 40 lines of output:" in failed and "line 60" in failed
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_git_check_reads_renames_as_one_entry(project):
+    # With -z, a rename is "R  new" followed by the old path as its own field.
+    def git(*args):
+        subprocess.run(["git", *args], cwd=project, check=True, capture_output=True)
+
+    git("init", "-q")
+    (project / "old name.txt").write_text("v1\n")
+    git("add", ".")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+    git("mv", "old name.txt", "new name.txt")
+    snapshot = commands.git_snapshot(project)
+    assert snapshot is not None
+    assert list(snapshot) == ["new name.txt"]
+    assert snapshot["new name.txt"].startswith("R ")
+
+
+def test_a_step_with_no_time_left_never_starts(project, tmp_path):
+    with open(tmp_path / "x.log", "wb") as log:
+        argv = [sys.executable, "tool.py", "touch"]
+        assert commands._run_one(argv, str(project), {}, log, remaining=0) is None
+    assert not (project / "tracked.txt").exists()
+
+
+def test_long_error_and_failure_lists_are_cut(tmp_path):
+    log = tmp_path / "x.log"
+    log.write_text("\n".join(f"A.cs({i},1): error CS{1000 + i}: e{i}" for i in range(25)))
+    cases = "".join(
+        f'<test-case fullname="T{i}" result="Failed"><failure><message>m</message></failure>'
+        "</test-case>"
+        for i in range(23)
+    )
+    results = tmp_path / "r.xml"
+    results.write_text(
+        f'<test-run total="23" passed="0" failed="23" skipped="0">{cases}</test-run>'
+    )
+    cmd = Prepared("x", [["x"]], str(tmp_path), 5, "ask", str(results), str(log))
+    report = commands.summarize(cmd, Outcome(1, 1, 1), [])
+    assert "Errors (25 unique):" in report and "... and 5 more" in report
+    assert "FAILED T19: m" in report and "FAILED T20" not in report
+    assert "... and 3 more failures" in report
+
+
+def test_unreadable_or_foreign_results_files(tmp_path):
+    broken = tmp_path / "broken.xml"
+    broken.write_text("<test-run")
+    summary = commands.nunit_summary(broken)
+    assert summary is not None and summary.startswith("Test results file could not be read")
+    other = tmp_path / "junit.xml"
+    other.write_text("<testsuites/>")
+    assert commands.nunit_summary(other) is None
+
+
+def test_a_missing_working_folder_is_refused(tmp_path, project):
+    write_config(
+        tmp_path / "projects", project, '[commands.x]\ndescription="d"\nrun=["a"]\ncwd="gone"'
+    )
+    config = commands.find_config(project, tmp_path / "projects")
+    with pytest.raises(CommandError, match="working folder .* doesn't exist"):
+        commands.prepare(config, project, "x", {}, tmp_path / "1-x")

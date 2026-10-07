@@ -192,3 +192,28 @@ def test_cli_prints_the_command_to_approve(project, tmp_path, capsys):
     out = capsys.readouterr()
     assert "Run this command?" in out.out and "tool.py touch" in out.out
     assert "--decision approve" in out.err
+
+
+def test_a_command_that_cannot_start_is_reported_not_raised(project, tmp_path, monkeypatch):
+    def cannot_start(prepared):
+        raise FileNotFoundError("tool vanished")
+
+    monkeypatch.setattr(team.commands, "run_prepared", cannot_start)
+    orch = ScriptedOrchestrator(decide("tester", command="build"), decide("finish", answer="a"))
+    result = start(project, make_graph(tmp_path, orch))
+    assert result.status == "completed"
+    assert "Command build could not start: tool vanished" in result.state["reports"][-1]["report"]
+
+
+@pytest.mark.parametrize("bad", [{"decision": "maybe"}, "approve"])
+def test_a_malformed_command_answer_asks_again_and_runs_nothing(project, tmp_path, bad):
+    orch = ScriptedOrchestrator(decide("tester", command="tests"), decide("finish", answer="a"))
+    graph = make_graph(tmp_path, orch)
+    start(project, graph)
+    again = resume_pipeline("t", bad, open_runs_db(), graph=graph)
+    assert again.status == "waiting"
+    assert again.waiting_for["question"].startswith("Run this command? (answer approve or reject")
+    assert not (project / "tracked.txt").exists()
+    done = resume_pipeline("t", {"decision": "approve"}, open_runs_db(), graph=graph)
+    assert done.status == "completed"
+    assert (project / "tracked.txt").exists()  # ran once, after the real approval

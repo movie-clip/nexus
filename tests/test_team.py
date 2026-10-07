@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from langchain_anthropic import ChatAnthropic
 
 from nexus.errors import InputError
 from nexus.models import PRICES
@@ -158,7 +159,9 @@ def test_role_models():
     assert team.ORCHESTRATOR.model == "claude-sonnet-5-5"
     assert all(team.role_spec(r).model == "claude-sonnet-5-5" for r in team.SPECIALISTS)
     for role in ["orchestrator", *team.SPECIALISTS]:
-        assert team.default_model(role).model == team.role_spec(role).model
+        model = team.default_model(role)
+        assert isinstance(model, ChatAnthropic)
+        assert model.model == team.role_spec(role).model
 
 
 def test_cost_sums_specialists_at_their_own_model_rates(project):
@@ -174,3 +177,18 @@ def test_registered_in_langgraph_json():
 
     graphs = json.loads((ROOT / "langgraph.json").read_text())["graphs"]
     assert graphs["team"] == "./src/nexus/pipelines/team.py:graph"
+
+
+def test_an_orchestrator_reply_that_is_not_a_decision_fails_the_round(tmp_path):
+    from langchain_core.runnables import RunnableLambda
+
+    class Raw:
+        """Returns a plain dict instead of the schema object."""
+
+        def with_structured_output(self, schema, method):
+            return RunnableLambda(lambda messages: {"next": "finish"})
+
+    graph = team.build(model_for=lambda role: Raw()).compile()  # type: ignore[arg-type,return-value]
+    result = run_pipeline(graph, "t", {"request": "q", "project": str(tmp_path)})
+    assert (result.status, result.failed_node) == ("failed", "orchestrator")
+    assert result.error == "TypeError: orchestrator returned dict, not a decision"

@@ -3,6 +3,7 @@
 from typing import TypedDict
 
 import pytest
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from nexus.errors import InputError
@@ -46,7 +47,7 @@ def flaky_graph(calls: dict, fail_first_b: bool = True):
 
 
 def test_failed_run_resumes_without_rerunning_finished_steps(isolated_runs_db):
-    calls = {}
+    calls: dict[str, int] = {}
     graph = flaky_graph(calls)
     first = run_pipeline(graph, "t1", {"n": 1}, open_runs_db())
     assert (first.status, first.failed_node) == ("failed", "b")
@@ -109,7 +110,7 @@ def test_every_checkpoint_keeps_the_pipeline_name_across_resumes(isolated_runs_d
     second = resume_pipeline("t", None, open_runs_db(), graph=graph)  # b passes, c fails
     assert second.failed_node == "c"
 
-    config = {"configurable": {"thread_id": "t"}}
+    config: RunnableConfig = {"configurable": {"thread_id": "t"}}
     names = [c.metadata.get("pipeline") for c in open_runs_db().list(config)]
     assert len(names) > 3 and set(names) == {"flaky"}
 

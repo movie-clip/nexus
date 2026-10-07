@@ -138,11 +138,20 @@ prints). Setting it up, starting and stopping it:
   before a trace leaves the process. If Langfuse is down, runs work the same,
   just without traces.
 
+## Checks
+
+Every change to nexus must pass one command, which runs lint, formatting,
+type checks (mypy) and the tests with a coverage floor (98%), and stops at the
+first failure:
+
+```sh
+uv run python scripts/check.py
+```
+
 ## Run any pipeline
 
 ```sh
 uv sync
-uv run pytest
 uv run python -m nexus.run --pipeline smoke --set scenario=flaky
 uv run python -m nexus.run --pipeline smoke --set fail_node=step_b --set fail_times=1
 ```
@@ -181,6 +190,7 @@ src/nexus/
     ask.py        a single read-only Deep Agent
     smoke.py      the engine's own test pipeline: routing scenarios and failure drills
 projects/         per-project commands the tester may run (<name>.toml)
+scripts/check.py  every check nexus must pass
 tests/
 ```
 

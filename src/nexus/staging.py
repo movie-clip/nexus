@@ -186,10 +186,7 @@ class StagedBackend(BackendProtocol):
         return _read_raw(source)
 
     def _ending_for(self, file_path: str) -> str:
-        """The file's own ending if it exists, else a neighbouring file's."""
-        existing = self._current_text(file_path)
-        if existing is not None:
-            return _ending_of(existing)
+        """The line ending for a new file: a neighbour's with the same extension, else LF."""
         folder = self._project_file(file_path).parent
         if folder.is_dir():
             for sibling in sorted(folder.iterdir()):

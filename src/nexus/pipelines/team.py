@@ -337,6 +337,8 @@ def build(
         ]
         with get_usage_metadata_callback() as usage:
             decision = model.invoke(messages)
+        if not isinstance(decision, Decision | FinalDecision):
+            raise TypeError(f"orchestrator returned {type(decision).__name__}, not a decision")
         log.info("round=%d next=%s reason=%s", used + 1, decision.next, decision.reason)
 
         update: dict = {"verdict": decision.next, "cost_usd": cost_usd(usage.usage_metadata)}
@@ -344,7 +346,7 @@ def build(
             if not decision.answer.strip():
                 raise ValueError("orchestrator finished without an answer")
             update["answer"] = decision.answer
-        elif decision.next == "tester":
+        elif isinstance(decision, Decision) and decision.next == "tester":
             if not decision.command.strip():
                 raise ValueError("orchestrator chose tester without a command")
             args = {a.name: a.value for a in decision.args}
@@ -386,17 +388,13 @@ def build(
         # Nothing but the question happens here: on resume LangGraph re-runs
         # this node from the top, and interrupt() returns the user's decision.
         batch = state["pending"]
-        decision = interrupt(
-            {
-                "question": "Apply these changes to the project?",
-                "summary": state["reports"][-1]["report"],
-                "files": [c["path"] for c in batch],
-                "diff": unified_diff(batch),
-            }
-        )
-        if not isinstance(decision, dict) or decision.get("decision") not in ("approve", "reject"):
-            raise ValueError(f"expected decision approve or reject, got {decision!r}")
-        return {"approval": {"decision": decision["decision"], "note": decision.get("note", "")}}
+        question = {
+            "question": "Apply these changes to the project?",
+            "summary": state["reports"][-1]["report"],
+            "files": [c["path"] for c in batch],
+            "diff": unified_diff(batch),
+        }
+        return {"approval": ask_decision(question)}
 
     def apply(state: TeamState) -> dict:
         batch = state["pending"]
@@ -442,20 +440,15 @@ def build(
 
     def approve_command(state: TeamState) -> dict:
         prepared = commands.Prepared(**state["prepared"])
-        decision = interrupt(
-            {
-                "question": "Run this command?",
-                "summary": state["brief"],
-                "command": (
-                    f"{prepared.display()}\n\n"
-                    f"in {prepared.cwd}, time limit {prepared.timeout} s, "
-                    f"log {prepared.log_file}"
-                ),
-            }
-        )
-        if not isinstance(decision, dict) or decision.get("decision") not in ("approve", "reject"):
-            raise ValueError(f"expected decision approve or reject, got {decision!r}")
-        approval = {"decision": decision["decision"], "note": decision.get("note", "")}
+        question = {
+            "question": "Run this command?",
+            "summary": state["brief"],
+            "command": (
+                f"{prepared.display()}\n\n"
+                f"in {prepared.cwd}, time limit {prepared.timeout} s, log {prepared.log_file}"
+            ),
+        }
+        approval = ask_decision(question)
         if approval["decision"] == "approve":
             return {"approval": approval}
         text = f"The user rejected running {prepared.name}; it did not run."
@@ -517,6 +510,24 @@ def build(
     )
     graph.add_edge("run_command", "orchestrator")
     return graph
+
+
+def ask_decision(question: dict) -> dict:
+    """Pause until the user answers approve or reject; ask again on anything else.
+
+    A malformed answer must not fail the node: LangGraph would replay that same
+    answer on every resume, and the run could never continue. Each repeated
+    question is a new interrupt, so the next resume answers that one.
+    """
+    asked = question
+    while True:
+        answer = interrupt(asked)
+        if isinstance(answer, dict) and answer.get("decision") in ("approve", "reject"):
+            return {"decision": answer["decision"], "note": str(answer.get("note") or "")}
+        asked = {
+            **question,
+            "question": f"{question['question']} (answer approve or reject; got {answer!r})",
+        }
 
 
 def after_tester(state: TeamState) -> str:

@@ -206,9 +206,9 @@ def prepare(
     cwd = (Path(project).resolve() / spec.cwd).resolve()
     if not cwd.is_dir():
         raise CommandError(f"working folder {cwd} doesn't exist")
-    steps = []
+    steps: list[list[str]] = []
     for step in spec.all_steps:
-        argv = []
+        argv: list[str] = []
         for arg in step:
             if isinstance(arg, list):  # optional group
                 if all(n in values for part in arg for n in PLACEHOLDER.findall(part)):

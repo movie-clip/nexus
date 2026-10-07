@@ -58,7 +58,7 @@ def test_retry_log_lines_carry_no_traceback():
         raise ConnectionError("down")
     except ConnectionError:
         record = logging.getLogger(RETRY_LOGGER).makeRecord(
-            RETRY_LOGGER, logging.INFO, __file__, 1, "Retrying task x", None, sys.exc_info()
+            RETRY_LOGGER, logging.INFO, __file__, 1, "Retrying task x", (), sys.exc_info()
         )
     handler = log_handler()
     assert handler.filter(record)

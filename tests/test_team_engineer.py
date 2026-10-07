@@ -2,6 +2,7 @@
 
 import pytest
 
+from nexus.errors import InputError
 from nexus.pipelines import team
 from nexus.run import open_runs_db, resume_pipeline, run_pipeline
 from tests.fakes import ScriptedOrchestrator, decide, final, scripted, tool_call
@@ -181,3 +182,29 @@ def test_diff_warns_about_line_ending_changes_it_cannot_show():
     assert diff.startswith("WARNING /m.cs: line endings change on 1 unchanged lines")
     clean = team.unified_diff([{"path": "/m.cs", "before": "a\r\nb\r\n", "after": "a\r\nB\r\n"}])
     assert "WARNING" not in clean
+
+
+@pytest.mark.parametrize("bad", [{"decision": "maybe"}, "approve", {"note": "x"}])
+def test_a_malformed_batch_answer_asks_again_and_writes_nothing(project, bad):
+    orch = ScriptedOrchestrator(
+        decide("engineer", brief="Set Speed to 12f."), decide("finish", answer="Stopped.")
+    )
+    graph = make_graph(orch, [engineer_that_edits()])
+    start(project, graph)
+    again = resume_pipeline("t", bad, open_runs_db(), graph=graph)
+    assert again.status == "waiting"
+    assert "answer approve or reject; got" in again.waiting_for["question"]
+    assert "+    float Speed = 12f;" in again.waiting_for["diff"]
+    assert (project / "Jump.cs").read_bytes() == ORIGINAL.encode()
+    # The repeated question takes a real answer.
+    done = resume_pipeline("t", {"decision": "reject"}, open_runs_db(), graph=graph)
+    assert done.status == "completed"
+    assert (project / "Jump.cs").read_bytes() == ORIGINAL.encode()
+
+
+def test_a_waiting_run_needs_a_decision_to_continue(project):
+    orch = ScriptedOrchestrator(decide("engineer", brief="Set Speed to 12f."))
+    graph = make_graph(orch, [engineer_that_edits()])
+    start(project, graph)
+    with pytest.raises(InputError, match="is waiting for a decision"):
+        resume_pipeline("t", None, open_runs_db(), graph=graph)

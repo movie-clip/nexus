@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Literal, get_type_hints
 
 from dotenv import load_dotenv
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -110,15 +111,18 @@ def _import_file(path: Path):
     # The deepest sys.path entry wins: with cwd on sys.path, src/nexus/x.py must
     # import as "nexus.x", not "src.nexus.x".
     path = path.resolve()
-    names = []
+    names: list[tuple[str, ...]] = []
     for entry in map(Path, sys.path):
         try:
             names.append(path.relative_to(entry.resolve()).with_suffix("").parts)
         except (ValueError, OSError):
             continue
     if names:
-        return importlib.import_module(".".join(min(names, key=len)))
+        shortest = min(names, key=len)
+        return importlib.import_module(".".join(shortest))
     spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise InputError(f"can't import {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -162,7 +166,10 @@ def run_pipeline(
         raise InputError(f"thread {thread_id!r} already exists; continue it with nexus.resume")
     graph = graph.copy(update={"checkpointer": checkpointer})
     # The pipeline name is saved with the checkpoints, so resume can find the graph.
-    config = {"configurable": {"thread_id": thread_id}, "metadata": {"pipeline": graph.get_name()}}
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id},
+        "metadata": {"pipeline": graph.get_name()},
+    }
     log.info("start graph=%s thread=%s", graph.get_name(), thread_id)
     return _drive(graph, inputs, config, resumed=False)
 
@@ -178,12 +185,12 @@ def resume_pipeline(
     (``decision``), or re-run the step a failed run stopped at (no decision).
     ``graph`` defaults to the pipeline recorded with the run."""
     checkpointer = checkpointer or open_runs_db()
-    config = {"configurable": {"thread_id": thread_id}}
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     saved = checkpointer.get_tuple(config)
     if saved is None:
         raise InputError(f"no run with thread {thread_id!r}")
     if graph is None:
-        graph = load_graph(saved.metadata.get("pipeline", ""), config_file)
+        graph = load_graph(str(saved.metadata.get("pipeline", "")), config_file)
     graph = graph.copy(update={"checkpointer": checkpointer})
     # Checkpoints only keep the metadata of the call that wrote them, so the
     # resumed steps must carry the pipeline name too, or the next resume can't
@@ -197,11 +204,13 @@ def resume_pipeline(
     if not snapshot.next:
         raise InputError(f"thread {thread_id!r} has already completed")
     log.info("resume graph=%s thread=%s", graph.get_name(), thread_id)
-    payload = Command(resume=decision) if decision is not None else None
+    payload: Command | None = Command(resume=decision) if decision is not None else None
     return _drive(graph, payload, config, resumed=True)
 
 
-def _drive(graph: CompiledStateGraph, payload: Any, config: dict, resumed: bool) -> RunResult:
+def _drive(
+    graph: CompiledStateGraph, payload: Any, config: RunnableConfig, resumed: bool
+) -> RunResult:
     thread_id = config["configurable"]["thread_id"]
     trace = tracing.run_config(thread_id, graph.get_name(), resumed)
     if trace:
@@ -216,7 +225,7 @@ def _drive(graph: CompiledStateGraph, payload: Any, config: dict, resumed: bool)
         tracing.flush()
 
 
-def _stream(graph: CompiledStateGraph, payload: Any, config: dict) -> RunResult:
+def _stream(graph: CompiledStateGraph, payload: Any, config: RunnableConfig) -> RunResult:
     thread_id = config["configurable"]["thread_id"]
     try:
         for update in graph.stream(payload, config=config, stream_mode="updates"):
