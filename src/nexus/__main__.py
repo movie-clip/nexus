@@ -85,7 +85,11 @@ def show(result: RunResult, as_json: bool = False) -> int:
         print(f"\n{asked.get('question', 'Waiting for a decision.')}\n")
         print(asked.get("diff") or asked.get("command", ""))
     cost = result.state.get("cost_usd", 0.0)
-    print(f"\n[{result.status}] thread={result.thread_id} cost=${cost:.4f}", file=sys.stderr)
+    line = f"\n[{result.status}] thread={result.thread_id} cost=${cost:.4f}"
+    if result.status == "failed":
+        # The failed step's spending is not in the run's cost; show it.
+        line += f" (this attempt spent ${result.spent_usd:.4f}, the failed step included)"
+    print(line, file=sys.stderr)
     resume = f"python -m nexus.resume --thread {result.thread_id}"
     if result.status == "waiting":
         print(

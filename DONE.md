@@ -42,6 +42,7 @@ promise is proven by a test, not by a demo.
 | Each specialist has a model-call limit (scout and reviewer 30, engineer 60, ask 30): the last call may not use tools and is told to write its report, a model that ignores that is stopped anyway, and the report says it was cut short | step-limit tests; live `tool_choice: none` call after tool use, 2026-10-07 | pre-F |
 | Specialists can't start Deep Agents' sub-subagents (`task`), whose calls no limit would count: the tool is not offered and is refused if called | hidden-tool tests | pre-F |
 | A run has a budget (`--budget`, default $2): the orchestrator sees spent and left, and once it is spent only "finish" is offered | budget tests; CLI flag test | pre-F |
+| Every model call is priced and logged as it ends (`model call 7 (scout): $0.03, run so far $0.41`); a failed run shows what the attempt spent, the failed step included, and an interrupted one logs it | cost meter tests | pre-F |
 
 ## Pilot metrics (once a real pipeline exists)
 

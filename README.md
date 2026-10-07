@@ -63,6 +63,9 @@ request -> orchestrator -+- scout -----------------------------------+
     must write its report, which then says it was cut short.
 
   When rounds or budget run out, the only choice offered is "finish".
+- Every model call is logged with its cost as it ends, e.g.
+  `model call 7 (scout): $0.0312, run so far $0.4123`. A failed run also shows
+  what the failed step spent, which isn't part of the run's recorded cost.
 - `--pipeline ask` uses a single agent instead (`pipelines/ask.py`).
 
 The scout, the reviewer and `--pipeline ask` are **read-only**: they can list,

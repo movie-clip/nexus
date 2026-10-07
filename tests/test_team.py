@@ -1,9 +1,11 @@
 """The team pipeline, with scripted models: no API calls, no cost."""
 
 import json
+import logging
 
 import pytest
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import AIMessage
 
 from nexus.errors import InputError
 from nexus.models import PRICES
@@ -233,3 +235,39 @@ def test_bad_budget_rejected(project, bad):
         run_pipeline(
             team.graph, "t", {"request": "x", "project": str(project), "max_cost_usd": bad}
         )
+
+
+# --- live cost ----------------------------------------------------------------
+
+
+def priced_search(output_tokens: int) -> AIMessage:
+    """A tool call that cost something (Sonnet 5.5 output tokens)."""
+    return AIMessage(
+        content="",
+        tool_calls=[{"name": "ls", "args": {"path": "/"}, "id": "call-ls"}],
+        response_metadata={"model_name": "claude-sonnet-5-5"},
+        usage_metadata={"input_tokens": 0, "output_tokens": output_tokens, "total_tokens": 0},
+    )
+
+
+def test_every_model_call_is_priced_and_logged_as_it_ends(project, caplog):
+    orch = ScriptedOrchestrator(decide("scout", brief="b"), decide("finish", answer="a"))
+    scout = scripted(priced_search(10_000), final("r", 0, 20_000, model="claude-sonnet-5-5"))
+    with caplog.at_level(logging.INFO, logger="nexus.models"):
+        result = run_team(project, orch, {"scout": [scout]})
+    assert result.spent_usd == pytest.approx(result.state["cost_usd"])
+    assert result.spent_usd == pytest.approx(0.30)  # 30k output tokens at $10/M
+    lines = [r.getMessage() for r in caplog.records if r.name == "nexus.models"]
+    assert lines == [
+        "model call 1 (scout): $0.1000, run so far $0.1000",
+        "model call 2 (scout): $0.2000, run so far $0.3000",
+    ]
+
+
+def test_a_failed_step_still_counts_what_it_spent(project):
+    orch = ScriptedOrchestrator(decide("scout", brief="b"))
+    scout = scripted(priced_search(10_000))  # then the script runs out: the step fails
+    result = run_team(project, orch, {"scout": [scout]})
+    assert (result.status, result.failed_node) == ("failed", "scout")
+    assert result.state["cost_usd"] == 0  # the failed step's cost never reached state
+    assert result.spent_usd == pytest.approx(0.10)

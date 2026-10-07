@@ -43,6 +43,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from nexus import tracing
 from nexus.errors import InputError
+from nexus.models import CostMeter
 from nexus.state import BaseState
 
 log = logging.getLogger("nexus.run")
@@ -63,6 +64,9 @@ class RunResult:
     failed_node: str | None = None
     error: str | None = None
     waiting_for: Any = None  # what the paused node asked (the interrupt value)
+    # What this start or resume spent, every model call counted, including a
+    # step that failed (its cost never reaches state["cost_usd"]).
+    spent_usd: float = 0.0
 
     @property
     def exit_code(self) -> int:
@@ -212,16 +216,22 @@ def _drive(
     graph: CompiledStateGraph, payload: Any, config: RunnableConfig, resumed: bool
 ) -> RunResult:
     thread_id = config["configurable"]["thread_id"]
+    meter = CostMeter()
+    config = {**config, "callbacks": [meter]}
     trace = tracing.run_config(thread_id, graph.get_name(), resumed)
     if trace:
         config = {
             **config,
-            "callbacks": trace["callbacks"],
+            "callbacks": [meter, *trace["callbacks"]],
             "metadata": {**config["metadata"], **trace["metadata"]},
         }
     try:
-        return _stream(graph, payload, config)
+        result = _stream(graph, payload, config)
+        result.spent_usd = meter.total
+        return result
     finally:
+        # Also when the run is interrupted (Ctrl+C): what this attempt cost.
+        log.info("this attempt spent $%.4f in %d model calls", meter.total, meter.calls)
         tracing.flush()
 
 

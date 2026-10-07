@@ -6,10 +6,15 @@ run can report what it spent.
 """
 
 import logging
+import threading
 from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages.ai import UsageMetadata
+from langchain_core.outputs import LLMResult
 
 log = logging.getLogger("nexus.models")
 
@@ -87,6 +92,56 @@ def cost_usd(usage_by_model: dict[str, UsageMetadata]) -> float:
             + usage.get("output_tokens", 0) * price.output
         ) / 1_000_000
     return total
+
+
+class CostMeter(BaseCallbackHandler):
+    """Prices every model call of a run as it finishes, and logs it.
+
+    Attached to the run's config, it sees every call: the orchestrator's and
+    those inside each specialist. ``total`` is what this attempt has spent,
+    including a step that later failed, whose cost never reaches the state.
+    """
+
+    def __init__(self) -> None:
+        self.total = 0.0
+        self.calls = 0
+        self._lock = threading.Lock()
+        self._who: dict[UUID, str] = {}
+
+    def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list[list[Any]],
+        *,
+        run_id: UUID,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        metadata = metadata or {}
+        # Inside a specialist the node is the agent's "model" step; its name is the role.
+        who = metadata.get("lc_agent_name") or metadata.get("langgraph_node") or "model"
+        with self._lock:
+            self._who[run_id] = str(who)
+
+    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
+        cost = 0.0
+        for generations in response.generations:
+            for generation in generations:
+                message = getattr(generation, "message", None)
+                usage = getattr(message, "usage_metadata", None)
+                if message is not None and usage:
+                    model = message.response_metadata.get("model_name", "unknown")
+                    cost += cost_usd({model: usage})
+        with self._lock:
+            who = self._who.pop(run_id, "model")
+            self.calls += 1
+            self.total += cost
+            calls, total = self.calls, self.total
+        log.info("model call %d (%s): $%.4f, run so far $%.4f", calls, who, cost, total)
+
+    def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        with self._lock:
+            self._who.pop(run_id, None)
 
 
 def _price_for(model: str) -> Price:

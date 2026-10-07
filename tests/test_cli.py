@@ -131,3 +131,12 @@ def test_budget_flag_reaches_the_orchestrator(cli, monkeypatch, project):
     use_team(monkeypatch, orch)
     assert run(project, "--budget", "0.5") == 0
     assert "<budget>spent $0.00 of $0.50; $0.50 left</budget>" in orch.calls[0][1][1][1]
+
+
+def test_a_failed_run_shows_what_the_attempt_spent(cli, monkeypatch, project, capsys):
+    from nexus.run import RunResult
+
+    failed = RunResult("t", "failed", {"cost_usd": 0.25}, "scout", "boom", spent_usd=0.4)
+    assert nexus_cli.show(failed) == 3
+    err = capsys.readouterr().err
+    assert "[failed] thread=t cost=$0.2500 (this attempt spent $0.4000" in err
