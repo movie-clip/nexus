@@ -68,5 +68,20 @@ class ScriptedOrchestrator:
         return RunnableLambda(respond)
 
 
-def decide(next: str, brief: str = "", answer: str = "", reason: str = "because") -> dict:
-    return {"next": next, "reason": reason, "brief": brief, "answer": answer}
+def decide(
+    next: str,
+    brief: str = "",
+    answer: str = "",
+    reason: str = "because",
+    command: str = "",
+    args: dict[str, str] | None = None,
+) -> dict:
+    # FinalDecision has no command/args; pydantic ignores the extra keys.
+    return {
+        "next": next,
+        "reason": reason,
+        "brief": brief,
+        "command": command,
+        "args": [{"name": k, "value": v} for k, v in (args or {}).items()],
+        "answer": answer,
+    }

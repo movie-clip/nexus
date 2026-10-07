@@ -71,12 +71,17 @@ class RunResult:
         return EXIT_RUN_ERRORS if self.state.get("errors") else EXIT_OK
 
 
-def open_runs_db(path: Path | None = None) -> SqliteSaver:
-    """The checkpointer that keeps every run, so it can be resumed later.
+def runs_db_path() -> Path:
+    """``runs/nexus.sqlite``; ``NEXUS_RUNS_DB`` overrides it (the tests use a temporary one).
 
-    ``NEXUS_RUNS_DB`` overrides the location (the tests use a temporary one).
+    Command logs go next to it, in ``logs/``.
     """
-    path = path or Path(os.environ.get("NEXUS_RUNS_DB", RUNS_DB))
+    return Path(os.environ.get("NEXUS_RUNS_DB", RUNS_DB))
+
+
+def open_runs_db(path: Path | None = None) -> SqliteSaver:
+    """The checkpointer that keeps every run, so it can be resumed later."""
+    path = path or runs_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     return SqliteSaver(sqlite3.connect(path, check_same_thread=False))
 

@@ -1,10 +1,14 @@
 """Answer an engineering request with an orchestrator and specialist roles.
 
-    START -> orchestrator -+- scout ------------------------------+
-               ^           +- reviewer ---------------------------+
-               |           +- engineer -+- (no changes) ----------+
-               |           |            +- approve -> apply ------+
-               +-----------+--------------- reports back <--------+
+    START -> orchestrator -+- scout ---------------------------------------+
+               ^           +- reviewer ------------------------------------+
+               |           +- engineer -+- (no changes) -------------------+
+               |           |            +- approve -> apply ---------------+
+               |           +- tester ---+- (bad command) ------------------+
+               |           |            +- approve_command -+- (rejected) -+
+               |           |            |                   +- run_command +
+               |           |            +- (auto) -> run_command ----------+
+               +-----------+--------------- reports back <-----------------+
                            +- finish -> END
 
 Each round the orchestrator (one structured Claude call, no file access) reads
@@ -21,6 +25,12 @@ pauses at ``approve`` and shows the whole batch as one diff. The user approves
 rejects with a note; either way the outcome goes back to the orchestrator as a
 report from "user". Specialists see only their brief; the orchestrator sees
 every brief and report.
+
+The tester is not a model: the orchestrator names one of the project's
+configured commands (``nexus.commands``, ``projects/<name>.toml``) and its
+param values; ``tester`` checks them, the run pauses at ``approve_command``
+unless the command is set to ``approval = "auto"``, and ``run_command`` runs it
+and reports a summary (errors, failed tests, files it changed, output tail).
 """
 
 import difflib
@@ -29,14 +39,17 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from operator import add
+from pathlib import Path
 from typing import Annotated, Literal, NotRequired, TypedDict
 
 from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from pydantic import AfterValidator, BaseModel, Field
 
+from nexus import commands
 from nexus.agents import existing_dir, read_only_agent, run_agent, staged_engineer
 from nexus.models import DEFAULT_MODEL, cost_usd, make_model
 from nexus.staging import Change, apply_changes
@@ -44,7 +57,7 @@ from nexus.state import BaseState
 
 log = logging.getLogger("nexus.team")
 
-DEFAULT_MAX_ROUNDS = 4
+DEFAULT_MAX_ROUNDS = 6
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,12 @@ non-trivial change was applied.
 change. Its edits are staged and shown to the user as one batch; the user \
 approves (it is applied to the project) or rejects it with a note. You then \
 get the outcome as a report from "user". The engineer cannot run builds or tests.
+- tester: runs one of the project's commands listed under <commands> (builds, \
+tests) and reports the result: errors, failed tests, files the command changed, \
+and the end of its output. Set `command` to its name and `args` to values for \
+its params (each must match the param's pattern; leave out a param to use its \
+default or skip it). Only the listed commands exist. The user may have to \
+approve the run, and may reject it with a note.
 - finish: you write the final answer to the user.
 
 How to decide:
@@ -81,8 +100,14 @@ How to decide:
 finish. A broad or high-stakes question: scout (again if a report leaves a \
 gap), then reviewer on your draft, then finish. A change: scout first unless \
 the request already names exactly what to change, then engineer.
-- After an approved change, send the reviewer to check it when it is non-trivial. \
-After a rejection, send the engineer again with a brief that addresses the \
+- After an approved change to code, verify it with the tester when a fitting \
+command exists: the fastest check first (a compile), then the narrowest tests \
+that cover the change. If it fails because of the change, send the engineer a \
+brief with the exact errors; if it fails for another reason (environment, \
+time limit, unrelated failures), don't loop: report it in the answer. Send the \
+reviewer to check a non-trivial change. Don't run commands for a request that \
+changes nothing unless it asks for that.
+- After a rejection, send the engineer again with a brief that addresses the \
 user's note, or finish and explain what was proposed and why it stopped.
 - Don't repeat a step that already answered the question. If a report leaves a \
 specific gap, send a narrower brief about that gap.
@@ -96,13 +121,14 @@ reviewer, include the full draft or the claims to check. For the engineer, \
 state exactly what to change, where, and any constraints.
 
 The final answer: Markdown, the direct answer first, citing files as \
-`path:line` from the reports. If changes were applied, list the files changed \
-and what the user should build or test to verify them. Don't mention the team, \
-rounds or specialists.
+`path:line` from the reports. If changes were applied, list the files changed, \
+what was built or tested and the result, and what the user should still check \
+themselves. Don't mention the team, rounds or specialists.
 
-Fields: `next`; `reason` (one sentence: why this step); `brief` (the task when \
-next is a specialist, otherwise ""); `answer` (the final answer when next is \
-finish, otherwise "").""",
+Fields: `next`; `reason` (one sentence: why this step; the user sees it when \
+asked to approve a command); `brief` (the task when next is scout, reviewer or \
+engineer, otherwise ""); `command` and `args` (when next is tester, otherwise \
+"" and []); `answer` (the final answer when next is finish, otherwise "").""",
 )
 
 READ_ONLY_SPECIALISTS: dict[str, Role] = {
@@ -155,20 +181,28 @@ unrelated code.
 - Your edits are staged: the user reviews them as one batch before anything \
 reaches the project. `read_file` shows your staged versions; `ls`, `glob` and \
 `grep` show the project as it was before your changes.
-- You cannot run commands, builds or tests.
+- You cannot run commands, builds or tests; after the user approves your \
+batch, the team may build and test it.
 
 Report, file by file, what you changed and why; anything you were unsure \
 about; and how to verify the change (what to build or test).""",
 )
 
-SPECIALISTS = [*READ_ONLY_SPECIALISTS, "engineer"]
-Step = Literal["scout", "reviewer", "engineer", "finish"]
+SPECIALISTS = [*READ_ONLY_SPECIALISTS, "engineer"]  # the roles that run a model
+Step = Literal["scout", "reviewer", "engineer", "tester", "finish"]
+
+
+class CommandArg(BaseModel):
+    name: str = Field(description="A param of the chosen command.")
+    value: str
 
 
 class Decision(BaseModel):
     next: Step
     reason: str
-    brief: str = Field(description="The specialist's task; empty when next is finish.")
+    brief: str = Field(description="The specialist's task; empty for tester and finish.")
+    command: str = Field(description="The command to run when next is tester; otherwise empty.")
+    args: list[CommandArg] = Field(description="Param values for the command; otherwise empty.")
     answer: str = Field(description="The final answer; empty unless next is finish.")
 
 
@@ -207,6 +241,8 @@ class TeamState(BaseState, total=False):
     brief: str
     pending: list[ChangeDict]  # the engineer's staged batch, awaiting approval
     approval: dict  # {"decision": "approve" | "reject", "note": str}
+    command: dict  # the orchestrator's pick for the tester: {"name": str, "args": {...}}
+    prepared: dict  # that command checked and filled in (commands.Prepared), awaiting its run
     answer: str
 
 
@@ -228,9 +264,10 @@ def rounds_used(state: TeamState) -> int:
     return sum(1 for r in state.get("reports", []) if r["role"] != "user")
 
 
-def orchestrator_message(state: TeamState, rounds_left: int) -> str:
+def orchestrator_message(state: TeamState, rounds_left: int, commands_text: str) -> str:
     parts = [
         f"<request>\n{state['request']}\n</request>",
+        f"<commands>\n{commands_text}\n</commands>",
         f"<rounds_left>{rounds_left}</rounds_left>",
     ]
     reports = state.get("reports", [])
@@ -284,15 +321,19 @@ def _hidden_ending_changes(before: str | None, after: str | None) -> int:
     )
 
 
-def build(model_for: Callable[[str], BaseChatModel] = default_model) -> StateGraph:
+def build(
+    model_for: Callable[[str], BaseChatModel] = default_model,
+    projects_dir: Path = commands.PROJECTS_DIR,
+) -> StateGraph:
     def orchestrator(state: TeamState) -> dict:
         used = rounds_used(state)
         rounds_left = max(state.get("max_rounds", DEFAULT_MAX_ROUNDS) - used, 0)
         schema = Decision if rounds_left else FinalDecision
         model = model_for("orchestrator").with_structured_output(schema, method="json_schema")
+        config = commands.find_config(state["project"], projects_dir)
         messages = [
             ("system", ORCHESTRATOR.prompt),
-            ("user", orchestrator_message(state, rounds_left)),
+            ("user", orchestrator_message(state, rounds_left, commands.describe(config))),
         ]
         with get_usage_metadata_callback() as usage:
             decision = model.invoke(messages)
@@ -303,6 +344,12 @@ def build(model_for: Callable[[str], BaseChatModel] = default_model) -> StateGra
             if not decision.answer.strip():
                 raise ValueError("orchestrator finished without an answer")
             update["answer"] = decision.answer
+        elif decision.next == "tester":
+            if not decision.command.strip():
+                raise ValueError("orchestrator chose tester without a command")
+            args = {a.name: a.value for a in decision.args}
+            update["command"] = {"name": decision.command, "args": args}
+            update["brief"] = f"Run {decision.command} with {args or 'no args'}: {decision.reason}"
         else:
             if not decision.brief.strip():
                 raise ValueError(f"orchestrator chose {decision.next} without a brief")
@@ -375,6 +422,63 @@ def build(model_for: Callable[[str], BaseChatModel] = default_model) -> StateGra
         }
         return {"reports": [report], "pending": []}
 
+    def tester(state: TeamState, config: RunnableConfig) -> dict:
+        """Check the orchestrator's command and fill it in; nothing runs yet."""
+        name, args = state["command"]["name"], state["command"]["args"]
+        thread_id = config.get("configurable", {}).get("thread_id", "no-thread")
+        stem = commands.log_stem(thread_id, len(state.get("reports", [])) + 1, name)
+        try:
+            project_config = commands.find_config(state["project"], projects_dir)
+            prepared = commands.prepare(project_config, state["project"], name, args, stem)
+        except commands.CommandError as exc:
+            log.info("command refused: %s", exc)
+            report: Report = {
+                "role": "tester",
+                "brief": state["brief"],
+                "report": f"Not run: {exc}.",
+            }
+            return {"reports": [report], "prepared": {}}
+        return {"prepared": asdict(prepared)}
+
+    def approve_command(state: TeamState) -> dict:
+        prepared = commands.Prepared(**state["prepared"])
+        decision = interrupt(
+            {
+                "question": "Run this command?",
+                "summary": state["brief"],
+                "command": (
+                    f"{prepared.display()}\n\n"
+                    f"in {prepared.cwd}, time limit {prepared.timeout} s, "
+                    f"log {prepared.log_file}"
+                ),
+            }
+        )
+        if not isinstance(decision, dict) or decision.get("decision") not in ("approve", "reject"):
+            raise ValueError(f"expected decision approve or reject, got {decision!r}")
+        approval = {"decision": decision["decision"], "note": decision.get("note", "")}
+        if approval["decision"] == "approve":
+            return {"approval": approval}
+        text = f"The user rejected running {prepared.name}; it did not run."
+        if approval["note"]:
+            text += f" Their note: {approval['note']}"
+        report: Report = {"role": "user", "brief": "Run this command?", "report": text}
+        return {"approval": approval, "reports": [report], "prepared": {}}
+
+    def run_command(state: TeamState) -> dict:
+        prepared = commands.Prepared(**state["prepared"])
+        log.info("running %s (time limit %d s)", prepared.name, prepared.timeout)
+        before = commands.git_snapshot(state["project"])
+        try:
+            outcome = commands.run_prepared(prepared)
+        except OSError as exc:
+            text = f"Command {prepared.name} could not start: {exc}"
+        else:
+            changed = commands.changed_between(before, commands.git_snapshot(state["project"]))
+            text = commands.summarize(prepared, outcome, changed)
+            log.info("%s exit=%s in %.0f s", prepared.name, outcome.exit_code, outcome.seconds)
+        report: Report = {"role": "tester", "brief": state["brief"], "report": text}
+        return {"reports": [report], "prepared": {}}
+
     graph = StateGraph(TeamState, input_schema=TeamInput)
     # No graph-level retries on model-driven nodes, so a failure never silently
     # repeats paid work. The SDK retries each API call.
@@ -389,7 +493,7 @@ def build(model_for: Callable[[str], BaseChatModel] = default_model) -> StateGra
     graph.add_conditional_edges(
         "orchestrator",
         lambda state: state["verdict"],
-        {**{role: role for role in SPECIALISTS}, "finish": END},
+        {**{role: role for role in SPECIALISTS}, "tester": "tester", "finish": END},
     )
     graph.add_conditional_edges(
         "engineer",
@@ -398,7 +502,28 @@ def build(model_for: Callable[[str], BaseChatModel] = default_model) -> StateGra
     )
     graph.add_edge("approve", "apply")
     graph.add_edge("apply", "orchestrator")
+    graph.add_node("tester", tester)
+    graph.add_node("approve_command", approve_command)
+    # Never retried: a command's failure is its result, not an error to repeat.
+    # If nexus itself dies mid-run, nexus.resume runs the approved command again.
+    graph.add_node("run_command", run_command)
+    graph.add_conditional_edges(
+        "tester", after_tester, ["approve_command", "run_command", "orchestrator"]
+    )
+    graph.add_conditional_edges(
+        "approve_command",
+        lambda state: "run_command" if state.get("prepared") else "orchestrator",
+        ["run_command", "orchestrator"],
+    )
+    graph.add_edge("run_command", "orchestrator")
     return graph
+
+
+def after_tester(state: TeamState) -> str:
+    prepared = state.get("prepared")
+    if not prepared:
+        return "orchestrator"  # refused; the report says why
+    return "run_command" if prepared["approval"] == "auto" else "approve_command"
 
 
 graph = build().compile(name="team")

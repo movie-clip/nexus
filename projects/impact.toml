@@ -1,0 +1,54 @@
+# Commands nexus's tester may run on C:\projects\impact. Nothing else can run.
+# The format is described in src/nexus/commands.py. In short: `run` is an
+# argument list (never a shell line); `{param}` values must fully match their
+# pattern; a nested list is left out unless all its params have values;
+# approval = "ask" pauses the run for your OK, "auto" runs without asking.
+
+path = "C:/projects/impact"
+
+[commands.compile]
+description = """Compile all C# assemblies with `dotnet build Impact.sln`. The fast check \
+(about a minute); works whether or not the Unity Editor is open. Catches compiler errors \
+only: no Unity codegen, baking or tests. A newly added .cs file is only compiled after \
+Unity has regenerated the .csproj files."""
+run = ["dotnet", "build", "Impact.sln", "-nologo", "-v:q"]
+cwd = "Impact"
+timeout = 900
+approval = "auto"  # only writes build output (Temp/, obj/), which git ignores
+
+[commands.unity-tests]
+description = """Run Unity Test Framework tests in batchmode (no window) through \
+Tools/Run-UnityTests.ps1, with NUnit results. Slow: starts Unity, usually several minutes. \
+Fails at once if the project is open in the Unity Editor. Project tests live in \
+Impact.EditModeTests and Impact.PlayModeTests; prefer EditMode and a filter for the \
+narrowest relevant fixture."""
+run = [
+  "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+  "-File", "Tools/Run-UnityTests.ps1",
+  "-Platform", "{mode}",
+  "-ResultsFile", "{results_file}",
+  ["-Filter", "{filter}"],
+]
+cwd = "Impact"
+timeout = 1800
+approval = "ask"
+
+[commands.unity-tests.params]
+mode = { pattern = "EditMode|PlayMode", default = "EditMode", description = "Test platform." }
+filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*", description = "Full name of a fixture or test, e.g. Impact.EditModeTests.Crates.CrateSystemEditModeTests. Leave out to run every test on the platform." }
+
+# Fallback for when the Editor is open: run the tests inside it through the
+# Unity CLI (beta). Not enabled yet; it needs a check with the Editor open:
+# the CLI's own --timeout (default 30 s) and run_tests' timeout param share a
+# name, and an Editor with unsaved scene changes may show a dialog that blocks.
+#
+# [commands.unity-tests-editor]
+# description = "Run tests inside the open Unity Editor through the Unity CLI."
+# steps = [
+#   ["unity", "command", "recompile", "--no-banner", "--non-interactive"],
+#   ["unity", "command", "run_tests", "--mode", "{mode}", ["--filter", "{filter}"],
+#    "--result-only", "--no-banner", "--non-interactive"],
+# ]
+# cwd = "Impact"
+# timeout = 1800
+# approval = "ask"

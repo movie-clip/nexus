@@ -8,7 +8,9 @@ specialists (scout, reviewer) to explore the project, then writes the answer.
 
 If the team's engineer proposes changes, the run pauses (exit code 4) and
 prints them as one diff; nothing is written until you approve with
-``python -m nexus.resume --thread <id> --decision approve`` (or reject).
+``python -m nexus.resume --thread <id> --decision approve`` (or reject). The
+same pause comes before the tester runs a build or test command, unless the
+project's config (``projects/<name>.toml``) sets that command to run without asking.
 
 The answer is printed to stdout as Markdown; progress (including each routing
 decision), cost and the thread id go to stderr. ``--json`` prints the full run
@@ -71,7 +73,7 @@ def show(result: RunResult, as_json: bool = False) -> int:
         asked = result.waiting_for or {}
         print(asked.get("summary", ""))
         print(f"\n{asked.get('question', 'Waiting for a decision.')}\n")
-        print(asked.get("diff", ""))
+        print(asked.get("diff") or asked.get("command", ""))
     cost = result.state.get("cost_usd", 0.0)
     print(f"\n[{result.status}] thread={result.thread_id} cost=${cost:.4f}", file=sys.stderr)
     resume = f"python -m nexus.resume --thread {result.thread_id}"

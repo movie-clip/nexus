@@ -29,6 +29,10 @@ promise is proven by a test, not by a demo.
 | A file changed on disk while waiting is not overwritten | conflict test | C |
 | Line endings are kept line by line, and the diff warns about ending changes it can't show | mixed-ending tests incl. a replay of a real impact file; live re-stage | C |
 | The engineer cannot write `.git` or `.env`, read `.env`, escape the project, or run commands | engineer limit tests (exact errors) | C |
+| The tester runs only commands listed in the project's config; values that don't fully match their pattern, unknown commands and params, batch files and missing programs are refused before anything is shown or run | command config and prepare tests; pipeline refusal tests | D |
+| An "ask" command pauses with the exact command line and runs only on approve; "auto" runs at once; a rejection runs nothing and doesn't use a round | approval flow tests over a fresh SQLite connection | D |
+| A command can't outlive its time limit (the whole process tree is killed), never sees nexus's secrets, and reports the files it changed | timeout test with a grandchild process; env test; git check test | D |
+| The tester's report has the result, unique compiler errors, failed tests from NUnit XML, changed files and the output tail; the full log is kept | summary tests; live compile of impact | D |
 | Every run reports its LLM cost in `cost_usd` | LLM-node test with a fake model | 5 |
 | Secrets and account-like values never reach traces | redaction test | 6 |
 
