@@ -6,6 +6,9 @@
 
 path = "C:/projects/impact"
 
+# Run in order, without asking, after every approved engineer batch.
+verify = ["compile"]
+
 [commands.compile]
 description = """Compile all C# assemblies with `dotnet build Impact.sln`. The fast check \
 (about a minute); works whether or not the Unity Editor is open. Catches compiler errors \
@@ -18,10 +21,11 @@ approval = "auto"  # only writes build output (Temp/, obj/), which git ignores
 
 [commands.unity-tests]
 description = """Run Unity Test Framework tests in batchmode (no window) through \
-Tools/Run-UnityTests.ps1, with NUnit results. Slow: starts Unity, usually several minutes. \
-Fails at once if the project is open in the Unity Editor. Project tests live in \
-Impact.EditModeTests and Impact.PlayModeTests; prefer EditMode and a filter for the \
-narrowest relevant fixture."""
+Tools/Run-UnityTests.ps1, with NUnit results. Run it only when the request asks for tests \
+to be run. Starts Unity: under a minute for a few fixtures, several minutes after large \
+script changes. Fails at once if the project is open in the Unity Editor. Project tests \
+live in Impact.EditModeTests and Impact.PlayModeTests; prefer EditMode and a filter \
+naming only the relevant fixtures."""
 run = [
   "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
   "-File", "Tools/Run-UnityTests.ps1",
@@ -31,11 +35,11 @@ run = [
 ]
 cwd = "Impact"
 timeout = 1800
-approval = "ask"
+approval = "auto"  # the user's choice; it only writes Unity's Library/ and Logs/, which git ignores
 
 [commands.unity-tests.params]
 mode = { pattern = "EditMode|PlayMode", default = "EditMode", description = "Test platform." }
-filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*", description = "Full name of a fixture or test, e.g. Impact.EditModeTests.Crates.CrateSystemEditModeTests. Leave out to run every test on the platform." }
+filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*(;[A-Za-z_][A-Za-z0-9_.]*)*", description = "Full names of fixtures or tests, separated by ';', e.g. Impact.EditModeTests.Core.DurationFormatterEditModeTests;Impact.EditModeTests.Crates.CrateSystemEditModeTests. Leave out to run every test on the platform." }
 
 # Fallback for when the Editor is open: run the tests inside it through the
 # Unity CLI (beta). Not enabled yet; it needs a check with the Editor open:

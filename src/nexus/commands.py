@@ -116,11 +116,24 @@ class CommandSpec(BaseModel):
     def all_steps(self) -> list[list[Arg]]:
         return [self.run] if self.run is not None else list(self.steps or [])
 
+    @property
+    def required_params(self) -> list[str]:
+        """Params the command can't run without: used outside an optional group, no default."""
+        used = {
+            n
+            for step in self.all_steps
+            for a in step
+            if isinstance(a, str)
+            for n in PLACEHOLDER.findall(a)
+        }
+        return sorted(n for n in used - BUILTINS if self.params[n].default is None)
+
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str
+    verify: list[str] = []  # run in order after every approved engineer batch
     commands: dict[str, CommandSpec] = {}
 
     @model_validator(mode="after")
@@ -128,6 +141,14 @@ class ProjectConfig(BaseModel):
         for name in self.commands:
             if not re.fullmatch(COMMAND_NAME, name):
                 raise ValueError(f"command name {name!r} must match {COMMAND_NAME}")
+        for name in self.verify:
+            if name not in self.commands:
+                raise ValueError(f"verify: unknown command {name!r}")
+            if self.verify.count(name) > 1:
+                raise ValueError(f"verify: {name} is listed twice")
+            missing = self.commands[name].required_params
+            if missing:
+                raise ValueError(f"verify: {name} needs a value for {', '.join(missing)}")
         return self
 
 

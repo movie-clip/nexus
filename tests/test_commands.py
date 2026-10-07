@@ -1,5 +1,6 @@
 """The tester's command layer: config, checking values, running, summarizing."""
 
+import re
 import shutil
 import subprocess
 import sys
@@ -122,6 +123,15 @@ def test_find_config_matches_the_project_folder(tmp_path, project, config):
         ('[commands.x]\ndescription="d"\nrun=["a"]\nshell=true', "Extra inputs"),
         ('[commands.x]\ndescription="d"\nrun=["a"]\napproval="never"', "approval"),
         ('[commands.x]\ndescription="d"\nrun=["a"]\nparams.p={pattern="("}', "bad pattern"),
+        ('verify=["nope"]\n[commands.x]\ndescription="d"\nrun=["a"]', "verify: unknown command"),
+        (
+            'verify=["x", "x"]\n[commands.x]\ndescription="d"\nrun=["a"]',
+            "verify: x is listed twice",
+        ),
+        (
+            'verify=["x"]\n[commands.x]\ndescription="d"\nrun=["a", "{p}"]\nparams.p={pattern="a"}',
+            "verify: x needs a value for p",
+        ),
     ],
 )
 def test_bad_configs_are_refused(tmp_path, project, body, error):
@@ -135,7 +145,32 @@ def test_the_impact_config_is_valid():
 
     config = commands.load_config(NEXUS_ROOT / "projects" / "impact.toml")
     assert set(config.commands) == {"compile", "unity-tests"}
-    assert config.commands["unity-tests"].approval == "ask"
+    assert config.verify == ["compile"]
+    tests = config.commands["unity-tests"]
+    assert tests.approval == "auto"
+    pattern = tests.params["filter"].pattern
+    for ok in ["A.B", "Impact.EditModeTests.Core.X;Impact.EditModeTests.Core.Y"]:
+        assert re.fullmatch(pattern, ok)
+    for bad in ["A;", ";A", "A; B", "A;-quit", "A;;B"]:
+        assert not re.fullmatch(pattern, bad)
+
+
+def test_verify_is_empty_unless_listed(config):
+    assert config.verify == []
+
+
+def test_a_verify_command_may_have_optional_params(tmp_path, project):
+    body = """\
+        verify = ["x"]
+        [commands.x]
+        description = "d"
+        run = ["a", "{mode}", ["{extra}"]]
+        params.mode = { pattern = "a", default = "a" }
+        params.extra = { pattern = "b" }
+    """
+    write_config(tmp_path / "projects", project, body)
+    config = commands.find_config(project, tmp_path / "projects")
+    assert config is not None and config.verify == ["x"]
 
 
 def test_describe_lists_commands_and_params(config):

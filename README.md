@@ -94,8 +94,8 @@ The same graphs work in two ways:
 
 The tester can only run commands you list for a project, in nexus (not in the
 project): `projects/<name>.toml`, matched by its `path`. `projects/impact.toml`
-is the example: `compile` (`dotnet build`, runs without asking) and
-`unity-tests` (Unity in batchmode, asks every time).
+is the example: `compile` (`dotnet build`) and `unity-tests` (Unity in
+batchmode, only when a request asks for tests), both run without asking.
 
 ```toml
 path = "C:/projects/impact"
