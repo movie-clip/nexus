@@ -54,8 +54,15 @@ request -> orchestrator -+- scout -----------------------------------+
   config and fills in its params; see [Commands](#commands).
 - Every run is saved in `runs/nexus.sqlite` (git-ignored), so a paused or
   failed run continues later from a new terminal with `nexus.resume`.
-- At most `--max-rounds` specialist and tester rounds (default 6); when none are left the
-  only choice offered is "finish".
+- Spending is capped three ways:
+  - at most `--max-rounds` specialist and tester rounds (default 6);
+  - at most `--budget` US dollars per run (default 2), checked before each
+    round, so a run can only go over by the round that crossed it;
+  - each specialist gets a number of model calls (scout and reviewer 30,
+    engineer 60, `--pipeline ask` 30). On the last one it can't use tools and
+    must write its report, which then says it was cut short.
+
+  When rounds or budget run out, the only choice offered is "finish".
 - `--pipeline ask` uses a single agent instead (`pipelines/ask.py`).
 
 The scout, the reviewer and `--pipeline ask` are **read-only**: they can list,

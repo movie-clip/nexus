@@ -43,6 +43,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         help=f"team only: specialist rounds allowed (default {team.DEFAULT_MAX_ROUNDS})",
     )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        metavar="USD",
+        help=f"team only: US dollars the run may spend (default {team.DEFAULT_BUDGET_USD:g})",
+    )
     parser.add_argument("--thread", help="thread id (default: <pipeline>-<timestamp>)")
     parser.add_argument("--json", action="store_true", help="print the full run result as JSON")
     args = parser.parse_args(argv)
@@ -51,10 +57,14 @@ def main(argv: list[str] | None = None) -> int:
 
     thread_id = args.thread or f"{args.pipeline}-{datetime.now():%Y%m%dT%H%M%S}"
     inputs = {"request": args.request, "project": args.project}
-    if args.max_rounds is not None:
-        if args.pipeline != "team":
-            parser.error("--max-rounds applies to the team pipeline only")
-        inputs["max_rounds"] = args.max_rounds
+    for flag, key, value in [
+        ("--max-rounds", "max_rounds", args.max_rounds),
+        ("--budget", "max_cost_usd", args.budget),
+    ]:
+        if value is not None:
+            if args.pipeline != "team":
+                parser.error(f"{flag} applies to the team pipeline only")
+            inputs[key] = value
     graph = team.graph if args.pipeline == "team" else ask.graph
     try:
         result = run_pipeline(graph, thread_id, inputs, open_runs_db())

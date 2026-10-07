@@ -64,6 +64,10 @@ from nexus.state import BaseState
 log = logging.getLogger("nexus.team")
 
 DEFAULT_MAX_ROUNDS = 6
+# US dollars one run may spend (the user's choice, 2026-10-07). Checked before
+# each round, so a run can go over by at most the round that crossed it, which
+# its specialist's step limit bounds.
+DEFAULT_BUDGET_USD = 2.0
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,10 @@ its params (each must match the param's pattern; leave out a param to use its \
 default or skip it). Only the listed commands exist. The user may have to \
 approve the run, and may reject it with a note.
 - finish: you write the final answer to the user.
+
+Limits: <rounds_left> is how many more steps you may take, and <budget> what \
+the run has spent and has left, in US dollars. When either runs out, only \
+finish is offered, so plan to answer within them.
 
 How to decide:
 - Scale effort to the request. A narrow factual question: one scout round, then \
@@ -244,12 +252,14 @@ class TeamInput(TypedDict):
     request: str
     project: Annotated[str, AfterValidator(existing_dir)]
     max_rounds: NotRequired[Annotated[int, Field(ge=0, le=10)]]
+    max_cost_usd: NotRequired[Annotated[float, Field(gt=0, le=20)]]
 
 
 class TeamState(BaseState, total=False):
     request: str
     project: str
     max_rounds: int
+    max_cost_usd: float
     reports: Annotated[list[Report], add]
     brief: str
     pending: list[ChangeDict]  # the engineer's staged batch, awaiting approval
@@ -277,11 +287,36 @@ def rounds_used(state: TeamState) -> int:
     return sum(1 for r in state.get("reports", []) if r["role"] != "user")
 
 
-def orchestrator_message(state: TeamState, rounds_left: int, commands_text: str) -> str:
+@dataclass(frozen=True)
+class Limits:
+    """What the run may still do: rounds and money."""
+
+    rounds_left: int
+    spent_usd: float
+    budget_usd: float
+
+    @classmethod
+    def of(cls, state: TeamState) -> "Limits":
+        rounds_left = max(state.get("max_rounds", DEFAULT_MAX_ROUNDS) - rounds_used(state), 0)
+        budget = state.get("max_cost_usd", DEFAULT_BUDGET_USD)
+        return cls(rounds_left, state.get("cost_usd", 0.0), budget)
+
+    @property
+    def money_left(self) -> float:
+        return max(self.budget_usd - self.spent_usd, 0.0)
+
+    @property
+    def can_dispatch(self) -> bool:
+        return self.rounds_left > 0 and self.money_left > 0
+
+
+def orchestrator_message(state: TeamState, limits: Limits, commands_text: str) -> str:
     parts = [
         f"<request>\n{state['request']}\n</request>",
         f"<commands>\n{commands_text}\n</commands>",
-        f"<rounds_left>{rounds_left}</rounds_left>",
+        f"<rounds_left>{limits.rounds_left}</rounds_left>",
+        f"<budget>spent ${limits.spent_usd:.2f} of ${limits.budget_usd:.2f}; "
+        f"${limits.money_left:.2f} left</budget>",
     ]
     reports = state.get("reports", [])
     if reports:
@@ -294,8 +329,13 @@ def orchestrator_message(state: TeamState, rounds_left: int, commands_text: str)
         parts.append("</reports>")
     else:
         parts.append("<reports>none yet</reports>")
-    if rounds_left == 0:
+    if limits.rounds_left == 0:
         parts.append("No rounds are left: finish now with the best answer the reports support.")
+    elif limits.money_left <= 0:
+        parts.append(
+            "The budget is spent: finish now with the best answer the reports support, "
+            "and say what is still unchecked."
+        )
     return "\n\n".join(parts)
 
 
@@ -339,20 +379,25 @@ def build(
     projects_dir: Path = commands.PROJECTS_DIR,
 ) -> StateGraph:
     def orchestrator(state: TeamState) -> dict:
-        used = rounds_used(state)
-        rounds_left = max(state.get("max_rounds", DEFAULT_MAX_ROUNDS) - used, 0)
-        schema = Decision if rounds_left else FinalDecision
+        limits = Limits.of(state)
+        schema = Decision if limits.can_dispatch else FinalDecision
         model = model_for("orchestrator").with_structured_output(schema, method="json_schema")
         config = commands.find_config(state["project"], projects_dir)
         messages = [
             ("system", ORCHESTRATOR.prompt),
-            ("user", orchestrator_message(state, rounds_left, commands.describe(config))),
+            ("user", orchestrator_message(state, limits, commands.describe(config))),
         ]
         with get_usage_metadata_callback() as usage:
             decision = model.invoke(messages)
         if not isinstance(decision, Decision | FinalDecision):
             raise TypeError(f"orchestrator returned {type(decision).__name__}, not a decision")
-        log.info("round=%d next=%s reason=%s", used + 1, decision.next, decision.reason)
+        log.info(
+            "round=%d next=%s spent=$%.2f reason=%s",
+            rounds_used(state) + 1,
+            decision.next,
+            limits.spent_usd,
+            decision.reason,
+        )
 
         update: dict = {"verdict": decision.next, "cost_usd": cost_usd(usage.usage_metadata)}
         if decision.next == "finish":

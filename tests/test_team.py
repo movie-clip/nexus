@@ -194,3 +194,42 @@ def test_an_orchestrator_reply_that_is_not_a_decision_fails_the_round(tmp_path):
     result = run_pipeline(graph, "t", {"request": "q", "project": str(tmp_path)})
     assert (result.status, result.failed_node) == ("failed", "orchestrator")
     assert result.error == "TypeError: orchestrator returned dict, not a decision"
+
+
+# --- budget -------------------------------------------------------------------
+
+
+def test_orchestrator_sees_the_budget(project):
+    orch = ScriptedOrchestrator(decide("finish", answer="a"))
+    run_team(project, orch, {})
+    assert "<budget>spent $0.00 of $2.00; $2.00 left</budget>" in user_text(orch.calls[0][1])
+
+
+def test_spent_budget_offers_only_finish(project):
+    orch = ScriptedOrchestrator(
+        decide("scout", brief="look"),
+        decide("finish", answer="best effort"),
+    )
+    # $0.10 of output at Sonnet 5.5's rate, against a $0.05 budget.
+    scout = scripted(final("r1", 0, 10_000, model="claude-sonnet-5-5"))
+    result = run_team(project, orch, {"scout": [scout]}, max_cost_usd=0.05)
+    assert [schema for schema, _ in orch.calls] == [team.Decision, team.FinalDecision]
+    message = user_text(orch.calls[-1][1])
+    assert "<budget>spent $0.10 of $0.05; $0.00 left</budget>" in message
+    assert "The budget is spent: finish now" in message
+    assert result.state["answer"] == "best effort"
+
+
+def test_rounds_and_budget_left_allow_another_round(project):
+    limits = team.Limits(rounds_left=1, spent_usd=1.99, budget_usd=2.0)
+    assert limits.can_dispatch and limits.money_left == pytest.approx(0.01)
+    assert not team.Limits(rounds_left=0, spent_usd=0, budget_usd=2.0).can_dispatch
+    assert not team.Limits(rounds_left=3, spent_usd=2.0, budget_usd=2.0).can_dispatch
+
+
+@pytest.mark.parametrize("bad", [0, -1, 21, "x"])
+def test_bad_budget_rejected(project, bad):
+    with pytest.raises(InputError, match="max_cost_usd"):
+        run_pipeline(
+            team.graph, "t", {"request": "x", "project": str(project), "max_cost_usd": bad}
+        )

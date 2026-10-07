@@ -99,6 +99,9 @@ def test_json_prints_the_whole_result(cli, monkeypatch, project, capsys):
         (["q", "--project", ".", "--pipeline", "ask", "--max-rounds", "2"], "team pipeline only"),
         (["q", "--project", "no/such/dir"], "project directory not found"),
         (["q", "--project", ".", "--max-rounds", "11"], "max_rounds"),
+        (["q", "--project", ".", "--pipeline", "ask", "--budget", "1"], "team pipeline only"),
+        (["q", "--project", ".", "--budget", "0"], "max_cost_usd"),
+        (["q", "--project", ".", "--budget", "lots"], "invalid float value"),
     ],
 )
 def test_nexus_refuses_bad_arguments(cli, capsys, argv, message):
@@ -121,3 +124,10 @@ def test_resume_refuses_bad_arguments(cli, capsys, argv, message):
         resume_cli.main(argv)
     assert exit_info.value.code == 2
     assert message in capsys.readouterr().err
+
+
+def test_budget_flag_reaches_the_orchestrator(cli, monkeypatch, project):
+    orch = ScriptedOrchestrator(decide("finish", answer="Hi."))
+    use_team(monkeypatch, orch)
+    assert run(project, "--budget", "0.5") == 0
+    assert "<budget>spent $0.00 of $0.50; $0.50 left</budget>" in orch.calls[0][1][1][1]
