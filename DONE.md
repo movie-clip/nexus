@@ -22,9 +22,13 @@ promise is proven by a test, not by a demo.
 | Specialists see only their brief; the orchestrator sees every brief and report | context isolation tests | B |
 | The round cap holds: with no rounds left, only "finish" is offered (verified against the live API) | round-cap tests; live schema call | B |
 | On the same question the team matches the single agent's answer quality at lower cost (live: $0.22 vs $0.34, both correct) | live comparison, 2026-10-07 | B |
-| A run survives a crash: resume continues, finished nodes are not run again | kill-and-resume test, counting node calls | 3 |
-| `run` refuses a thread id that already exists (no piling onto old state); only `resume` continues one | existing-thread test | 3 |
-| A human gate pauses the run with no side effects, and `resume --decision` finishes it | approve and reject scenario tests | 4 |
+| A failed run resumes from the failed step; finished steps are not run again | resume test counting node calls | C |
+| `run` refuses a thread id that already exists; only `resume` continues one | existing-thread test | C |
+| The engineer's edits are staged, never written directly; the run pauses with one diff for the whole batch | engineer flow tests; live run on impact (project untouched while paused) | C |
+| Approve applies the batch from a new process; reject writes nothing and passes the note on | approve/reject tests over a fresh SQLite connection; live reject | C |
+| A file changed on disk while waiting is not overwritten | conflict test | C |
+| Line endings are kept line by line, and the diff warns about ending changes it can't show | mixed-ending tests incl. a replay of a real impact file; live re-stage | C |
+| The engineer cannot write `.git` or `.env`, read `.env`, escape the project, or run commands | engineer limit tests (exact errors) | C |
 | Every run reports its LLM cost in `cost_usd` | LLM-node test with a fake model | 5 |
 | Secrets and account-like values never reach traces | redaction test | 6 |
 

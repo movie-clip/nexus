@@ -10,6 +10,7 @@ from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.language_models import BaseChatModel
 
 from nexus.models import cost_usd
+from nexus.staging import StagedBackend
 
 WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete", "execute"})
 
@@ -76,6 +77,32 @@ def read_only_agent(project: str, model: BaseChatModel, system_prompt: str, name
         memory=MEMORY_FILES,
         name=name,
     )
+
+
+ENGINEER_PERMISSIONS = [
+    FilesystemPermission(operations=["write"], paths=["/.git/**"], mode="deny"),
+    FilesystemPermission(operations=["write"], paths=["/**/.env", "/**/.env.*"], mode="deny"),
+]
+
+
+def staged_engineer(project: str, staging_dir: str, model: BaseChatModel, system_prompt: str):
+    """A Deep Agent that can change ``project``, but only through staging.
+
+    Its writes land in ``staging_dir`` (see ``nexus.staging``), never in the
+    project; the caller collects them as one batch with ``backend.changes()``.
+    It cannot write inside ``.git`` or to ``.env`` files, cannot read ``.env``
+    files, and has no shell. Returns ``(agent, backend)``.
+    """
+    backend = StagedBackend(project, staging_dir)
+    agent = create_deep_agent(
+        model=model,
+        system_prompt=system_prompt,
+        backend=backend,
+        permissions=ENGINEER_PERMISSIONS + NO_SECRETS_PERMISSIONS,
+        memory=MEMORY_FILES,
+        name="engineer",
+    )
+    return agent, backend
 
 
 def run_agent(agent, message: str) -> tuple[str, float]:

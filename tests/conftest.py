@@ -11,6 +11,14 @@ ROOT = Path(__file__).resolve().parents[1]
 FAST_RETRY = DEFAULT_RETRY._replace(initial_interval=0.0, jitter=False)
 
 
+@pytest.fixture(autouse=True)
+def isolated_runs_db(tmp_path, monkeypatch):
+    """Never touch the real runs/nexus.sqlite; subprocesses inherit this too."""
+    path = tmp_path / "runs.sqlite"
+    monkeypatch.setenv("NEXUS_RUNS_DB", str(path))
+    return path
+
+
 @pytest.fixture
 def smoke_graph():
     return smoke.build(retry_policy=FAST_RETRY).compile()

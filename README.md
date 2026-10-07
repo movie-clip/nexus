@@ -20,8 +20,9 @@ in US dollars go to stderr. `--json` prints the full result instead.
 By default a **team** answers (`pipelines/team.py`):
 
 ```
-request -> orchestrator -+- scout (Sonnet 5.5) ---+
-              ^          +- reviewer (Opus 5.5) --+-> report back
+request -> orchestrator -+- scout -----------------------------+
+              ^          +- reviewer --------------------------+
+              |          +- engineer -> (pause: you approve) --+-> report back
               +----------+- finish -> answer
 ```
 
@@ -31,13 +32,30 @@ request -> orchestrator -+- scout (Sonnet 5.5) ---+
   by the API's structured output; LangGraph routes on it in plain code, and
   each decision and its reason is logged.
 - The **scout** finds what is actually in the repo; the **reviewer** checks a
-  draft or claims against the code. Each sees only its brief.
+  draft, claims, or an applied change against the code. Each sees only its brief.
+- The **engineer** changes the project, but only through staging: its edits
+  never touch the project directly. When it is done the run **pauses** (exit
+  code 4) and prints the whole batch as one diff. Nothing is written until you
+  decide:
+
+  ```sh
+  uv run python -m nexus.resume --thread <id> --decision approve
+  uv run python -m nexus.resume --thread <id> --decision reject --note "what to change"
+  ```
+
+  Approve writes the batch, skipping any file that changed on disk since it was
+  staged. Reject writes nothing and passes your note to the orchestrator.
+  Line endings are kept line by line, and the diff warns if a change would
+  alter endings it can't show. The engineer cannot write inside `.git`, touch
+  `.env` files, run commands, or commit.
+- Every run is saved in `runs/nexus.sqlite` (git-ignored), so a paused or
+  failed run continues later from a new terminal with `nexus.resume`.
 - At most `--max-rounds` specialist rounds (default 4); when none are left the
   only choice offered is "finish".
 - `--pipeline ask` uses a single agent instead (`pipelines/ask.py`).
 
-Every agent is **read-only**: it can list, read, glob and grep inside
-`--project` and nothing else. Write tools are not offered, writes are denied
+The scout, the reviewer and `--pipeline ask` are **read-only**: they can list,
+read, glob and grep inside `--project` and nothing else. Write tools are not offered, writes are denied
 by permission rules anyway, paths outside the project are blocked, `.env`
 files are unreadable, and there is no shell. The project's own `AGENTS.md` /
 `CLAUDE.md` are loaded when present.
@@ -54,6 +72,7 @@ The same graphs work in two ways:
 | | Command | Use it for |
 |---|---|---|
 | **Ask** | `uv run python -m nexus "<request>" --project <path>` | a request in plain text (team by default) |
+| **Resume** | `uv run python -m nexus.resume --thread <id> [--decision approve\|reject]` | answer a paused run, or retry a failed one |
 | **Run** | `uv run python -m nexus.run --pipeline <name>` | any pipeline, inputs via `--set`, result as JSON |
 | **Inspect** | `uv run langgraph dev` | developing: local API and Studio UI to watch and step through runs (in-memory, dev only) |
 
@@ -76,7 +95,8 @@ retry, plus the traceback once if the run fails. The result (`thread_id`,
 | 0 | completed |
 | 1 | completed, but the run recorded errors in state |
 | 2 | bad arguments or inputs; nothing ran |
-| 3 | failed: a node raised and its retries ran out |
+| 3 | failed: a node raised and its retries ran out; `nexus.resume` retries the failed step |
+| 4 | waiting: paused for your decision; continue with `nexus.resume` |
 
 ## Layout
 
@@ -86,12 +106,14 @@ src/nexus/
   state.py        BaseState: errors, cost_usd, artifacts, retries, verdict
   retry.py        DEFAULT_RETRY (transient errors) and retry_update (capped "try again" routes)
   models.py       Claude model defaults (effort, refusal fallbacks) and cost_usd from token usage
-  agents.py       shared Deep Agent pieces: read_only_agent, permissions, HideTools, run_agent
+  agents.py       shared Deep Agent pieces: read_only_agent, staged_engineer, permissions, run_agent
+  staging.py      StagedBackend (the engineer's writes go here) and apply_changes
+  resume.py       `python -m nexus.resume`
   __main__.py     `python -m nexus "<request>"`
   run.py          the CLI: loads a graph from langgraph.json, validates inputs, runs, reports
   errors.py       InputError
   pipelines/
-    team.py       orchestrator + scout + reviewer (default for `python -m nexus`)
+    team.py       orchestrator + scout + reviewer + engineer (default for `python -m nexus`)
     ask.py        a single read-only Deep Agent
     smoke.py      the engine's own test pipeline: routing scenarios and failure drills
 tests/

@@ -6,6 +6,10 @@ By default the ``team`` pipeline answers: an orchestrator sends read-only
 specialists (scout, reviewer) to explore the project, then writes the answer.
 ``--pipeline ask`` uses a single read-only agent instead.
 
+If the team's engineer proposes changes, the run pauses (exit code 4) and
+prints them as one diff; nothing is written until you approve with
+``python -m nexus.resume --thread <id> --decision approve`` (or reject).
+
 The answer is printed to stdout as Markdown; progress (including each routing
 decision), cost and the thread id go to stderr. ``--json`` prints the full run
 result instead. Exit codes are the same as ``nexus.run``.
@@ -20,7 +24,7 @@ from datetime import datetime
 
 from nexus.errors import InputError
 from nexus.pipelines import ask, team
-from nexus.run import load_env, log_handler, run_pipeline
+from nexus.run import RunResult, load_env, log_handler, open_runs_db, run_pipeline
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,16 +55,34 @@ def main(argv: list[str] | None = None) -> int:
         inputs["max_rounds"] = args.max_rounds
     graph = team.graph if args.pipeline == "team" else ask.graph
     try:
-        result = run_pipeline(graph, thread_id, inputs)
+        result = run_pipeline(graph, thread_id, inputs, open_runs_db())
     except InputError as exc:
         parser.error(str(exc))
+    return show(result, as_json=args.json)
 
-    if args.json:
+
+def show(result: RunResult, as_json: bool = False) -> int:
+    """Print a run's outcome for a person (or as JSON) and return its exit code."""
+    if as_json:
         print(json.dumps(asdict(result), indent=2, default=str))
     elif result.status == "completed":
         print(result.state.get("answer", ""))
+    elif result.status == "waiting":
+        asked = result.waiting_for or {}
+        print(asked.get("summary", ""))
+        print(f"\n{asked.get('question', 'Waiting for a decision.')}\n")
+        print(asked.get("diff", ""))
     cost = result.state.get("cost_usd", 0.0)
-    print(f"\n[{result.status}] thread={thread_id} cost=${cost:.4f}", file=sys.stderr)
+    print(f"\n[{result.status}] thread={result.thread_id} cost=${cost:.4f}", file=sys.stderr)
+    resume = f"python -m nexus.resume --thread {result.thread_id}"
+    if result.status == "waiting":
+        print(
+            f"Approve: {resume} --decision approve\n"
+            f'Reject:  {resume} --decision reject --note "what to change"',
+            file=sys.stderr,
+        )
+    elif result.status == "failed":
+        print(f"Retry the failed step: {resume}", file=sys.stderr)
     return result.exit_code
 
 

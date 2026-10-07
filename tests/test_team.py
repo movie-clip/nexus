@@ -156,12 +156,9 @@ def test_bad_max_rounds_rejected(project, bad):
 def test_role_models():
     # The user's choice during development: every role on Sonnet 5.5.
     assert team.ORCHESTRATOR.model == "claude-sonnet-5-5"
-    assert all(spec.model == "claude-sonnet-5-5" for spec in team.SPECIALISTS.values())
+    assert all(team.role_spec(r).model == "claude-sonnet-5-5" for r in team.SPECIALISTS)
     for role in ["orchestrator", *team.SPECIALISTS]:
-        assert (
-            team.default_model(role).model
-            == (team.ORCHESTRATOR if role == "orchestrator" else team.SPECIALISTS[role]).model
-        )
+        assert team.default_model(role).model == team.role_spec(role).model
 
 
 def test_cost_sums_specialists_at_their_own_model_rates(project):
