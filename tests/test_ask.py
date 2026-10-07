@@ -3,52 +3,13 @@
 import logging
 
 import pytest
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 
 from nexus.errors import InputError
 from nexus.models import PRICES, UNKNOWN_PRICE, cost_usd
 from nexus.pipelines import ask
 from nexus.run import run_pipeline
-
-MODEL = "claude-opus-5-5"
-
-
-class ScriptedModel(GenericFakeChatModel):
-    """Replays fixed AI messages and records what the agent sent it."""
-
-    seen_tools: list[list[str]] = []
-    seen_prompts: list[list] = []
-
-    def bind_tools(self, tools, **kwargs):
-        self.seen_tools.append([getattr(t, "name", None) or t.get("name") for t in tools])
-        return self
-
-    def _generate(self, messages, *args, **kwargs):
-        self.seen_prompts.append(messages)
-        return super()._generate(messages, *args, **kwargs)
-
-
-def scripted(*steps: AIMessage) -> ScriptedModel:
-    model = ScriptedModel(messages=iter(steps))
-    model.seen_tools, model.seen_prompts = [], []
-    return model
-
-
-def tool_call(name: str, **args) -> AIMessage:
-    return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"call-{name}"}])
-
-
-def final(text: str, input_tokens: int = 0, output_tokens: int = 0) -> AIMessage:
-    return AIMessage(
-        content=text,
-        response_metadata={"model_name": MODEL},
-        usage_metadata={
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        },
-    )
+from tests.fakes import MODEL, final, scripted, tool_call
 
 
 def run_agent(project, model):

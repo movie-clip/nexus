@@ -1,34 +1,23 @@
-"""Answer an engineering request about a project, read-only.
+"""Answer an engineering request about a project with one read-only agent.
 
     START -> answer -> END
 
 One Deep Agent explores the project with read-only file tools (ls, read_file,
-glob, grep, plus `task` for a subagent with the same limits) and answers in
-text. It cannot change anything:
-
-  * the backend is rooted at the project, with path traversal blocked;
-  * write tools are not offered to the model, and every write is denied by a
-    permission rule anyway; subagents inherit the rules;
-  * there is no shell tool (Deep Agents only adds one for sandbox backends);
-  * secrets files (.env) are unreadable.
-
-The project's own AGENTS.md / CLAUDE.md are loaded as memory when present, so
-nexus itself carries nothing project-specific.
+glob, grep, plus `task` for a helper subagent with the same limits) and
+answers in text. See ``nexus.agents.read_only_agent`` for what it cannot do.
+The ``team`` pipeline answers the same requests with an orchestrator and
+specialist roles.
 """
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Annotated, TypedDict
 
-from deepagents import create_deep_agent
-from deepagents.backends import FilesystemBackend
-from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 from pydantic import AfterValidator
 
-from nexus.agents import NO_SECRETS_PERMISSIONS, READ_ONLY_PERMISSIONS, WRITE_TOOLS, HideTools
-from nexus.models import cost_usd, make_model
+from nexus.agents import existing_dir, read_only_agent, run_agent
+from nexus.models import make_model
 from nexus.state import BaseState
 
 SYSTEM_PROMPT = """\
@@ -45,19 +34,10 @@ why, as a concrete plan.
 
 Answer in Markdown, starting with the direct answer."""
 
-MEMORY_FILES = ["/AGENTS.md", "/CLAUDE.md"]
-
-
-def _existing_dir(path: str) -> str:
-    resolved = Path(path).expanduser().resolve()
-    if not resolved.is_dir():
-        raise ValueError(f"project directory not found: {path}")
-    return str(resolved)
-
 
 class AskInput(TypedDict):
     request: str
-    project: Annotated[str, AfterValidator(_existing_dir)]
+    project: Annotated[str, AfterValidator(existing_dir)]
 
 
 class AskState(BaseState, total=False):
@@ -67,27 +47,13 @@ class AskState(BaseState, total=False):
 
 
 def build_agent(project: str, model: BaseChatModel):
-    return create_deep_agent(
-        model=model,
-        system_prompt=SYSTEM_PROMPT,
-        backend=FilesystemBackend(root_dir=project, virtual_mode=True),
-        permissions=READ_ONLY_PERMISSIONS + NO_SECRETS_PERMISSIONS,
-        middleware=[HideTools(WRITE_TOOLS)],
-        memory=MEMORY_FILES,
-        name="ask",
-    )
+    return read_only_agent(project, model, SYSTEM_PROMPT, name="ask")
 
 
 def build(model_factory: Callable[[], BaseChatModel] = make_model) -> StateGraph:
     def answer(state: AskState) -> dict:
-        agent = build_agent(state["project"], model_factory())
-        # Counts every model call, including any subagent the agent starts.
-        with get_usage_metadata_callback() as usage:
-            result = agent.invoke({"messages": [{"role": "user", "content": state["request"]}]})
-        return {
-            "answer": result["messages"][-1].text,
-            "cost_usd": cost_usd(usage.usage_metadata),
-        }
+        text, cost = run_agent(build_agent(state["project"], model_factory()), state["request"])
+        return {"answer": text, "cost_usd": cost}
 
     graph = StateGraph(AskState, input_schema=AskInput)
     # No graph-level retry policy here: one agent run is many model calls, and

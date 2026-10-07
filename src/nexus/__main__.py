@@ -2,9 +2,13 @@
 
     python -m nexus "how does jumping work?" --project C:\\projects\\impact
 
-The answer is printed to stdout as Markdown; progress, cost and the thread id
-go to stderr. ``--json`` prints the full run result instead. Exit codes are
-the same as ``nexus.run``.
+By default the ``team`` pipeline answers: an orchestrator sends read-only
+specialists (scout, reviewer) to explore the project, then writes the answer.
+``--pipeline ask`` uses a single read-only agent instead.
+
+The answer is printed to stdout as Markdown; progress (including each routing
+decision), cost and the thread id go to stderr. ``--json`` prints the full run
+result instead. Exit codes are the same as ``nexus.run``.
 """
 
 import argparse
@@ -15,7 +19,7 @@ from dataclasses import asdict
 from datetime import datetime
 
 from nexus.errors import InputError
-from nexus.pipelines import ask
+from nexus.pipelines import ask, team
 from nexus.run import load_env, log_handler, run_pipeline
 
 
@@ -27,16 +31,27 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("request", help="what you want, in plain words")
     parser.add_argument("--project", required=True, help="path to the project's repo")
-    parser.add_argument("--thread", help="thread id (default: ask-<timestamp>)")
+    parser.add_argument("--pipeline", choices=["team", "ask"], default="team")
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        help=f"team only: specialist rounds allowed (default {team.DEFAULT_MAX_ROUNDS})",
+    )
+    parser.add_argument("--thread", help="thread id (default: <pipeline>-<timestamp>)")
     parser.add_argument("--json", action="store_true", help="print the full run result as JSON")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, handlers=[log_handler()])
     load_env()
 
-    thread_id = args.thread or f"ask-{datetime.now():%Y%m%dT%H%M%S}"
+    thread_id = args.thread or f"{args.pipeline}-{datetime.now():%Y%m%dT%H%M%S}"
     inputs = {"request": args.request, "project": args.project}
+    if args.max_rounds is not None:
+        if args.pipeline != "team":
+            parser.error("--max-rounds applies to the team pipeline only")
+        inputs["max_rounds"] = args.max_rounds
+    graph = team.graph if args.pipeline == "team" else ask.graph
     try:
-        result = run_pipeline(ask.graph, thread_id, inputs)
+        result = run_pipeline(graph, thread_id, inputs)
     except InputError as exc:
         parser.error(str(exc))
 
