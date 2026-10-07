@@ -33,8 +33,10 @@ promise is proven by a test, not by a demo.
 | An "ask" command pauses with the exact command line and runs only on approve; "auto" runs at once; a rejection runs nothing and doesn't use a round | approval flow tests over a fresh SQLite connection | D |
 | A command can't outlive its time limit (the whole process tree is killed), never sees nexus's secrets, and reports the files it changed | timeout test with a grandchild process; env test; git check test | D |
 | The tester's report has the result, unique compiler errors, failed tests from NUnit XML, changed files and the output tail; the full log is kept | summary tests; live compile of impact | D |
-| Every run reports its LLM cost in `cost_usd` | LLM-node test with a fake model | 5 |
-| Secrets and account-like values never reach traces | redaction test | 6 |
+| Every run reports its LLM cost in `cost_usd` | LLM-node test with a fake model | A |
+| Without Langfuse keys nothing is traced; with them, a run and every step inside it (orchestrator, specialists, model and tool calls) is one trace, and a run and its resumes share a session | tracing tests with an in-memory exporter; first live trace, 2026-10-07 | E |
+| nexus's secrets (its `.env` keys and tokens, any `ANTHROPIC_*`) are masked before a span leaves the process | masking test with a secret in a tool result; live trace searched for every secret | E |
+| A Langfuse that is down or unreachable never fails or stalls a run | unreachable-endpoint test | E |
 
 ## Pilot metrics (once a real pipeline exists)
 
@@ -45,5 +47,6 @@ promise is proven by a test, not by a demo.
 
 ## Decision point
 
-After slice 5, check whether the graph earns its keep. If the flows are linear
+After slice F (the first real task on impact), check whether the graph earns
+its keep. If the flows are linear
 with one pause, plain Python plus a state file would do; switch then.

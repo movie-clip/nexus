@@ -16,6 +16,11 @@ def isolated_runs_db(tmp_path, monkeypatch):
     """Never touch the real runs/nexus.sqlite; subprocesses inherit this too."""
     path = tmp_path / "runs.sqlite"
     monkeypatch.setenv("NEXUS_RUNS_DB", str(path))
+    # No tracing unless a test turns it on (test_tracing.py). Set to empty
+    # rather than removed: the CLI tests' subprocesses load nexus's .env, which
+    # doesn't override a variable that is already set.
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "")
     return path
 
 

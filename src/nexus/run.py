@@ -40,6 +40,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from pydantic import TypeAdapter, ValidationError
 
+from nexus import tracing
 from nexus.errors import InputError
 from nexus.state import BaseState
 
@@ -163,7 +164,7 @@ def run_pipeline(
     # The pipeline name is saved with the checkpoints, so resume can find the graph.
     config = {"configurable": {"thread_id": thread_id}, "metadata": {"pipeline": graph.get_name()}}
     log.info("start graph=%s thread=%s", graph.get_name(), thread_id)
-    return _drive(graph, inputs, config)
+    return _drive(graph, inputs, config, resumed=False)
 
 
 def resume_pipeline(
@@ -196,10 +197,26 @@ def resume_pipeline(
     if not snapshot.next:
         raise InputError(f"thread {thread_id!r} has already completed")
     log.info("resume graph=%s thread=%s", graph.get_name(), thread_id)
-    return _drive(graph, Command(resume=decision) if decision is not None else None, config)
+    payload = Command(resume=decision) if decision is not None else None
+    return _drive(graph, payload, config, resumed=True)
 
 
-def _drive(graph: CompiledStateGraph, payload: Any, config: dict) -> RunResult:
+def _drive(graph: CompiledStateGraph, payload: Any, config: dict, resumed: bool) -> RunResult:
+    thread_id = config["configurable"]["thread_id"]
+    trace = tracing.run_config(thread_id, graph.get_name(), resumed)
+    if trace:
+        config = {
+            **config,
+            "callbacks": trace["callbacks"],
+            "metadata": {**config["metadata"], **trace["metadata"]},
+        }
+    try:
+        return _stream(graph, payload, config)
+    finally:
+        tracing.flush()
+
+
+def _stream(graph: CompiledStateGraph, payload: Any, config: dict) -> RunResult:
     thread_id = config["configurable"]["thread_id"]
     try:
         for update in graph.stream(payload, config=config, stream_mode="updates"):

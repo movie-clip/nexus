@@ -118,6 +118,26 @@ filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*", description = "..." }
   project), the files `git status` shows the command changed, and the end of
   the output (40 lines after a failure, 10 after a success).
 
+## Tracing
+
+Runs can be traced to a Langfuse that runs on this PC in Docker: every
+orchestrator decision, every specialist, each model call and tool call, with
+its input and output, tokens and time (a run's dollar cost is what nexus
+prints). Setting it up, starting and stopping it:
+`C:\projects\tools\langfuse\README.md`.
+
+- Tracing is on when `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and
+  `LANGFUSE_BASE_URL` are in nexus's `.env`; comment them out to turn it off.
+  Only `nexus` and `nexus.run`/`nexus.resume` runs are traced, not runs
+  started in `langgraph dev`.
+- Each start or resume is one trace, named after the pipeline (`team`,
+  `team (resume)`). A run and its resumes are grouped under **Sessions** by
+  thread id.
+- nexus's secrets (anything in its `.env` named like a key, secret, token or
+  password, and any `ANTHROPIC_*` variable) are replaced with `[secret]`
+  before a trace leaves the process. If Langfuse is down, runs work the same,
+  just without traces.
+
 ## Run any pipeline
 
 ```sh
@@ -154,6 +174,7 @@ src/nexus/
   resume.py       `python -m nexus.resume`
   __main__.py     `python -m nexus "<request>"`
   run.py          the CLI: loads a graph from langgraph.json, validates inputs, runs, reports
+  tracing.py      optional Langfuse tracing, with nexus's secrets masked
   errors.py       InputError
   pipelines/
     team.py       orchestrator + scout + reviewer + engineer + tester (default for `python -m nexus`)
