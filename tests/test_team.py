@@ -140,11 +140,28 @@ def test_final_schema_cannot_express_another_round():
         (decide("finish", answer=""), "finished without an answer"),
     ],
 )
-def test_incomplete_decision_fails_the_run(project, decision, message):
-    result = run_team(project, ScriptedOrchestrator(decision), {})
-    assert result.status == "failed"
-    assert result.failed_node == "orchestrator"
-    assert message in result.error
+def test_incomplete_decision_is_sent_back_to_the_model(project, decision, message):
+    orch = ScriptedOrchestrator(decision, decide("finish", answer="Fixed."))
+    result = run_team(project, orch, {})
+    assert (result.status, result.state["answer"]) == ("completed", "Fixed.")
+    retry = orch.calls[1][1]
+    assert retry[-2][0] == "assistant"  # what it said, then what was wrong with it
+    assert retry[-1] == ("user", f"That decision can't be carried out: {message}. Decide again.")
+
+
+@pytest.mark.parametrize(
+    ("decision", "message"),
+    [
+        (decide("scout", brief="  "), "chose scout without a brief"),
+        (decide("tester", command=" "), "chose tester without a command"),
+    ],
+)
+def test_a_decision_still_incomplete_after_two_fixes_fails_the_run(project, decision, message):
+    orch = ScriptedOrchestrator(decision, decision, decision)
+    result = run_team(project, orch, {})
+    assert (result.status, result.failed_node) == ("failed", "orchestrator")
+    assert result.error == f"ValueError: orchestrator {message}, 3 times"
+    assert len(orch.calls) == 3
 
 
 # --- inputs, models, cost -----------------------------------------------------

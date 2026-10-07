@@ -387,10 +387,26 @@ def build(
             ("system", ORCHESTRATOR.prompt),
             ("user", orchestrator_message(state, limits, commands.describe(config))),
         ]
+        # An incomplete decision (a step without its brief, say) goes back to
+        # the model with the problem named, a few times, before the round fails.
         with get_usage_metadata_callback() as usage:
-            decision = model.invoke(messages)
-        if not isinstance(decision, Decision | FinalDecision):
-            raise TypeError(f"orchestrator returned {type(decision).__name__}, not a decision")
+            for _ in range(1 + MAX_DECISION_FIXES):
+                decision = model.invoke(messages)
+                if not isinstance(decision, Decision | FinalDecision):
+                    raise TypeError(
+                        f"orchestrator returned {type(decision).__name__}, not a decision"
+                    )
+                problem = decision_problem(decision)
+                if problem is None:
+                    break
+                log.info("incomplete decision (%s); asking again", problem)
+                messages = [
+                    *messages,
+                    ("assistant", decision.model_dump_json()),
+                    ("user", f"That decision can't be carried out: {problem}. Decide again."),
+                ]
+            else:
+                raise ValueError(f"orchestrator {problem}, {1 + MAX_DECISION_FIXES} times")
         log.info(
             "round=%d next=%s spent=$%.2f reason=%s",
             rounds_used(state) + 1,
@@ -401,18 +417,12 @@ def build(
 
         update: dict = {"verdict": decision.next, "cost_usd": cost_usd(usage.usage_metadata)}
         if decision.next == "finish":
-            if not decision.answer.strip():
-                raise ValueError("orchestrator finished without an answer")
             update["answer"] = decision.answer
         elif isinstance(decision, Decision) and decision.next == "tester":
-            if not decision.command.strip():
-                raise ValueError("orchestrator chose tester without a command")
             args = {a.name: a.value for a in decision.args}
             update["command"] = {"name": decision.command, "args": args}
             update["brief"] = f"Run {decision.command} with {args or 'no args'}: {decision.reason}"
         else:
-            if not decision.brief.strip():
-                raise ValueError(f"orchestrator chose {decision.next} without a brief")
             update["brief"] = decision.brief
         return update
 
@@ -570,6 +580,18 @@ def build(
     )
     graph.add_edge("run_command", "orchestrator")
     return graph
+
+
+MAX_DECISION_FIXES = 2  # times an incomplete decision is sent back before the round fails
+
+
+def decision_problem(decision: Decision | FinalDecision) -> str | None:
+    """What makes a decision impossible to carry out, or None if it is complete."""
+    if decision.next == "finish":
+        return None if decision.answer.strip() else "finished without an answer"
+    if isinstance(decision, Decision) and decision.next == "tester":
+        return None if decision.command.strip() else "chose tester without a command"
+    return None if decision.brief.strip() else f"chose {decision.next} without a brief"
 
 
 def ask_decision(question: dict) -> dict:

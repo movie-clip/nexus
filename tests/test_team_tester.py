@@ -148,13 +148,6 @@ def test_project_without_config_has_no_commands(tmp_path):
     )
 
 
-def test_tester_without_a_command_fails_the_run(project, tmp_path):
-    orch = ScriptedOrchestrator(decide("tester", command=" "))
-    result = start(project, make_graph(tmp_path, orch))
-    assert result.status == "failed"
-    assert "orchestrator chose tester without a command" in result.error
-
-
 def test_change_then_build_flow(project, tmp_path):
     """engineer -> approve -> apply -> tester (auto) -> finish."""
     engineer = scripted(

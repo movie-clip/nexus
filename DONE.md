@@ -43,6 +43,7 @@ promise is proven by a test, not by a demo.
 | Specialists can't start Deep Agents' sub-subagents (`task`), whose calls no limit would count: the tool is not offered and is refused if called | hidden-tool tests | pre-F |
 | A run has a budget (`--budget`, default $2): the orchestrator sees spent and left, and once it is spent only "finish" is offered | budget tests; CLI flag test | pre-F |
 | Every model call is priced and logged as it ends (`model call 7 (scout): $0.03, run so far $0.41`); a failed run shows what the attempt spent, the failed step included, and an interrupted one logs it | cost meter tests | pre-F |
+| An incomplete orchestrator decision (a step without its brief, command or answer) goes back to the model with the problem named, up to twice, before the round fails | decision-fix tests | pre-F |
 
 ## Pilot metrics (once a real pipeline exists)
 
