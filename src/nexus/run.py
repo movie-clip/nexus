@@ -184,6 +184,10 @@ def resume_pipeline(
     if graph is None:
         graph = load_graph(saved.metadata.get("pipeline", ""), config_file)
     graph = graph.copy(update={"checkpointer": checkpointer})
+    # Checkpoints only keep the metadata of the call that wrote them, so the
+    # resumed steps must carry the pipeline name too, or the next resume can't
+    # find the graph.
+    config["metadata"] = {"pipeline": graph.get_name()}
     snapshot = graph.get_state(config)
     if snapshot.interrupts and decision is None:
         raise InputError(f"thread {thread_id!r} is waiting for a decision")

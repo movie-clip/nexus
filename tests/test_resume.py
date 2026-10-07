@@ -81,6 +81,39 @@ def test_decision_for_a_run_that_is_not_waiting_is_refused(isolated_runs_db):
         resume_pipeline("f", {"decision": "approve"}, open_runs_db(), graph=graph)
 
 
+def two_failures_graph(calls: dict):
+    """a -> b -> c; b and c each raise on their first call."""
+
+    def step(name):
+        def node(state):
+            calls[name] = calls.get(name, 0) + 1
+            if name != "a" and calls[name] == 1:
+                raise ValueError(f"{name} broke")
+            return {"steps": [*state.get("steps", []), name]}
+
+        return node
+
+    g = StateGraph(S, input_schema=In)
+    for name in "abc":
+        g.add_node(name, step(name))
+    g.add_edge(START, "a")
+    g.add_edge("a", "b")
+    g.add_edge("b", "c")
+    g.add_edge("c", END)
+    return g.compile(name="flaky")
+
+
+def test_every_checkpoint_keeps_the_pipeline_name_across_resumes(isolated_runs_db):
+    graph = two_failures_graph({})
+    run_pipeline(graph, "t", {"n": 1}, open_runs_db())  # fails at b
+    second = resume_pipeline("t", None, open_runs_db(), graph=graph)  # b passes, c fails
+    assert second.failed_node == "c"
+
+    config = {"configurable": {"thread_id": "t"}}
+    names = [c.metadata.get("pipeline") for c in open_runs_db().list(config)]
+    assert len(names) > 3 and set(names) == {"flaky"}
+
+
 def test_resume_finds_the_pipeline_recorded_with_the_run(isolated_runs_db, in_repo_root):
     inputs = {"fail_node": "check", "fail_kind": "bug"}
     from nexus.pipelines import smoke
