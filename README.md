@@ -22,7 +22,7 @@ By default a **team** answers (`pipelines/team.py`):
 ```
 request -> orchestrator -+- scout -----------------------------------+
               ^          +- reviewer --------------------------------+
-              |          +- engineer -> (pause: you approve) --------+-> report back
+              |          +- engineer -> (pause: you approve) -> verify +-> report back
               |          +- tester -> (pause unless "auto") -> run --+
               +----------+- finish -> answer
 ```
@@ -48,10 +48,17 @@ request -> orchestrator -+- scout -----------------------------------+
   staged. Reject writes nothing and passes your note to the orchestrator.
   Line endings are kept line by line, and the diff warns if a change would
   alter endings it can't show. The engineer cannot write inside `.git`, touch
-  `.env` files, run commands, or commit.
+  `.env` files, run commands, or commit. It writes tests only when the
+  request asks for them.
+- **Verify**: after you approve a batch, the project's `verify` commands (for
+  impact: `compile`) run at once, without asking, in order, stopping at the
+  first failure. The orchestrator reads their reports and can send the
+  engineer to fix a failure. They don't use up rounds.
 - The **tester** runs a build or test command and reports the result. It is
   not a model: the orchestrator picks a command by name from the project's
-  config and fills in its params; see [Commands](#commands).
+  config and fills in its params; see [Commands](#commands). Tests are run
+  only when the request asks for them (write tests at milestones, e.g.
+  "write EditMode tests for the crate pipeline and run them").
 - Every run is saved in `runs/nexus.sqlite` (git-ignored), so a paused or
   failed run continues later from a new terminal with `nexus.resume`.
 - Spending is capped three ways:
@@ -99,6 +106,7 @@ batchmode, only when a request asks for tests), both run without asking.
 
 ```toml
 path = "C:/projects/impact"
+verify = ["compile"]  # run after every approved batch, without asking
 
 [commands.unity-tests]
 description = "What it checks and when to use it (the orchestrator reads this)."
@@ -118,6 +126,10 @@ filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*", description = "..." }
   it is shown to you. A nested list is left out unless its params have values.
 - `approval = "ask"` pauses the run and prints the exact command, folder and
   time limit; answer with `nexus.resume --decision approve|reject`.
+- `verify` lists commands to run after every approved batch. Listing one is
+  your approval, so it runs without asking even if set to `"ask"`. Each must
+  be runnable without values from a model: all its required params have
+  defaults.
 - The command runs without nexus's secrets in its environment, with no input,
   and its whole process tree is killed at the time limit. A command's failure
   is its result: it is never retried. If nexus itself dies while a command

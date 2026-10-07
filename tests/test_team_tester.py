@@ -198,6 +198,110 @@ def test_a_command_that_cannot_start_is_reported_not_raised(project, tmp_path, m
     assert "Command build could not start: tool vanished" in result.state["reports"][-1]["report"]
 
 
+# --- verify: commands run after every approved batch ---------------------------------
+
+
+def with_verify(tmp_path, project, verify: str) -> None:
+    write_config(tmp_path / "projects", project, f"verify = {verify}\n\n" + CONFIG)
+
+
+def edit_jump() -> object:
+    return scripted(
+        tool_call("edit_file", file_path="/Jump.cs", old_string="10f", new_string="12f"),
+        final("Raised Speed."),
+    )
+
+
+def change_and_approve(project, tmp_path, orch, decision="approve", **extra):
+    graph = make_graph(tmp_path, orch, [edit_jump()])
+    assert start(project, graph, **extra).status == "waiting"
+    return resume_pipeline("t", {"decision": decision}, open_runs_db(), graph=graph)
+
+
+def test_an_approved_batch_is_verified_without_asking(project, tmp_path):
+    with_verify(tmp_path, project, '["build", "tests"]')  # "tests" is set to ask
+    orch = ScriptedOrchestrator(
+        decide("engineer", brief="Set Speed to 12f in /Jump.cs."),
+        decide("finish", answer="Done."),
+    )
+    result = change_and_approve(project, tmp_path, orch)
+
+    assert result.status == "completed"
+    roles = [r["role"] for r in result.state["reports"]]
+    assert roles == ["engineer", "user", "verify", "verify"]
+    build, tests = result.state["reports"][2:]
+    assert build["brief"] == "Run automatically after the approved change: build"
+    assert "Command: build" in build["report"] and "Result: succeeded" in build["report"]
+    assert "Command: tests" in tests["report"]
+    assert (project / "tracked.txt").exists()  # ran without a pause
+    assert "Run automatically after the approved change: tests" in orch.calls[-1][1][1][1]
+
+
+def test_verify_stops_at_the_first_failure(project, tmp_path):
+    write_config(
+        tmp_path / "projects",
+        project,
+        'verify = ["broken", "tests"]\n\n'
+        + CONFIG
+        + '\n[commands.broken]\ndescription = "d"\nrun = [PYTHON, "tool.py", "fail"]\n',
+    )
+    orch = ScriptedOrchestrator(decide("engineer", brief="b"), decide("finish", answer="a"))
+    result = change_and_approve(project, tmp_path, orch)
+
+    (failed,) = [r for r in result.state["reports"] if r["role"] == "verify"]
+    assert "Command: broken" in failed["report"] and "Result: FAILED" in failed["report"]
+    assert not (project / "tracked.txt").exists()
+
+
+def test_a_rejected_batch_is_not_verified(project, tmp_path):
+    with_verify(tmp_path, project, '["tests"]')
+    orch = ScriptedOrchestrator(decide("engineer", brief="b"), decide("finish", answer="a"))
+    result = change_and_approve(project, tmp_path, orch, decision="reject")
+
+    assert [r["role"] for r in result.state["reports"]] == ["engineer", "user"]
+    assert not (project / "tracked.txt").exists()
+
+
+def test_verify_does_not_use_up_rounds(project, tmp_path):
+    with_verify(tmp_path, project, '["build"]')
+    orch = ScriptedOrchestrator(decide("engineer", brief="b"), decide("finish", answer="a"))
+    change_and_approve(project, tmp_path, orch, max_rounds=2)
+    assert "<rounds_left>1</rounds_left>" in orch.calls[-1][1][1][1]  # only the engineer counted
+
+
+def test_the_orchestrator_is_told_what_runs_automatically(project, tmp_path):
+    with_verify(tmp_path, project, '["build"]')
+    orch = ScriptedOrchestrator(decide("finish", answer="a"))
+    start(project, make_graph(tmp_path, orch))
+    assert "Run automatically after each approved change: build" in orch.calls[0][1][1][1]
+
+
+def test_a_verify_command_that_cannot_start_is_reported(project, tmp_path, monkeypatch):
+    def cannot_start(prepared):
+        raise FileNotFoundError("tool vanished")
+
+    monkeypatch.setattr(team.commands, "run_prepared", cannot_start)
+    with_verify(tmp_path, project, '["build", "tests"]')
+    orch = ScriptedOrchestrator(decide("engineer", brief="b"), decide("finish", answer="a"))
+    result = change_and_approve(project, tmp_path, orch)
+
+    (report,) = [r for r in result.state["reports"] if r["role"] == "verify"]
+    assert report["report"] == "Command build could not start: tool vanished"
+
+
+def test_a_verify_command_that_cannot_be_prepared_is_reported(project, tmp_path, monkeypatch):
+    def refuse(*args):
+        raise team.commands.CommandError("program 'python' not found")
+
+    with_verify(tmp_path, project, '["build", "tests"]')
+    monkeypatch.setattr(team.commands, "prepare", refuse)
+    orch = ScriptedOrchestrator(decide("engineer", brief="b"), decide("finish", answer="a"))
+    result = change_and_approve(project, tmp_path, orch)
+
+    (report,) = [r for r in result.state["reports"] if r["role"] == "verify"]
+    assert report["report"] == "Not run: program 'python' not found."
+
+
 @pytest.mark.parametrize("bad", [{"decision": "maybe"}, "approve"])
 def test_a_malformed_command_answer_asks_again_and_runs_nothing(project, tmp_path, bad):
     orch = ScriptedOrchestrator(decide("tester", command="tests"), decide("finish", answer="a"))

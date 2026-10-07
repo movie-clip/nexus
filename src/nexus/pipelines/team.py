@@ -3,7 +3,8 @@
     START -> orchestrator -+- scout ---------------------------------------+
                ^           +- reviewer ------------------------------------+
                |           +- engineer -+- (no changes) -------------------+
-               |           |            +- approve -> apply ---------------+
+               |           |            +- approve -> apply -+- (rejected) +
+               |           |                                 +- verify ----+
                |           +- tester ---+- (bad command) ------------------+
                |           |            +- approve_command -+- (rejected) -+
                |           |            |                   +- run_command +
@@ -23,8 +24,10 @@ The engineer's writes are staged (``nexus.staging``): when it is done, the run
 pauses at ``approve`` and shows the whole batch as one diff. The user approves
 (``apply`` writes it to the project, skipping files changed on disk since) or
 rejects with a note; either way the outcome goes back to the orchestrator as a
-report from "user". Specialists see only their brief; the orchestrator sees
-every brief and report.
+report from "user". After an approval, ``verify`` runs the project's ``verify``
+commands (a compile, say) in order without asking, stopping at the first
+failure; they report as "verify" and don't use up rounds. Specialists see only
+their brief; the orchestrator sees every brief and report.
 
 The tester is not a model: the orchestrator names one of the project's
 configured commands (``nexus.commands``, ``projects/<name>.toml``) and its
@@ -106,7 +109,9 @@ tests) and reports the result: errors, failed tests, files the command changed, 
 and the end of its output. Set `command` to its name and `args` to values for \
 its params (each must match the param's pattern; leave out a param to use its \
 default or skip it). Only the listed commands exist. The user may have to \
-approve the run, and may reject it with a note.
+approve the run, and may reject it with a note. Commands listed as run \
+automatically after each approved change need no tester round: their results \
+arrive as reports from "verify".
 - finish: you write the final answer to the user.
 
 Limits: <rounds_left> is how many more steps you may take, and <budget> what \
@@ -118,13 +123,16 @@ How to decide:
 finish. A broad or high-stakes question: scout (again if a report leaves a \
 gap), then reviewer on your draft, then finish. A change: scout first unless \
 the request already names exactly what to change, then engineer.
-- After an approved change to code, verify it with the tester when a fitting \
-command exists: the fastest check first (a compile), then the narrowest tests \
-that cover the change. If it fails because of the change, send the engineer a \
-brief with the exact errors; if it fails for another reason (environment, \
-time limit, unrelated failures), don't loop: report it in the answer. Send the \
-reviewer to check a non-trivial change. Don't run commands for a request that \
-changes nothing unless it asks for that.
+- After an approved change, read the "verify" reports; don't run those \
+commands again. If no "verify" report came, check the change with the \
+tester's fastest build command when one exists. If a check fails because of \
+the change, send the engineer a brief with the exact errors; if it fails for \
+another reason (environment, time limit, unrelated failures), don't loop: \
+report it in the answer. Send the reviewer to check a non-trivial change.
+- Tests are written and run only when the request asks for them: then the \
+engineer writes them (say so in its brief) and the tester runs the narrowest \
+tests that cover the change. Don't run commands for a request that changes \
+nothing unless it asks for that.
 - After a rejection, send the engineer again with a brief that addresses the \
 user's note, or finish and explain what was proposed and why it stopped.
 - Don't repeat a step that already answered the question. If a report leaves a \
@@ -202,8 +210,9 @@ unrelated code.
 - Your edits are staged: the user reviews them as one batch before anything \
 reaches the project. `read_file` shows your staged versions; `ls`, `glob` and \
 `grep` show the project as it was before your changes.
+- Don't write or change tests unless your brief asks for them.
 - You cannot run commands, builds or tests; after the user approves your \
-batch, the team may build and test it.
+batch, the project's checks (such as a compile) run automatically.
 
 Report, file by file, what you changed and why; anything you were unsure \
 about; and how to verify the change (what to build or test).""",
@@ -283,8 +292,8 @@ def default_model(role: str) -> BaseChatModel:
 
 
 def rounds_used(state: TeamState) -> int:
-    """Specialist dispatches so far; the user's approval outcomes don't count."""
-    return sum(1 for r in state.get("reports", []) if r["role"] != "user")
+    """Dispatches the orchestrator chose; approval outcomes and verify runs don't count."""
+    return sum(1 for r in state.get("reports", []) if r["role"] not in ("user", "verify"))
 
 
 @dataclass(frozen=True)
@@ -528,19 +537,34 @@ def build(
         return {"approval": approval, "reports": [report], "prepared": {}}
 
     def run_command(state: TeamState) -> dict:
-        prepared = commands.Prepared(**state["prepared"])
-        log.info("running %s (time limit %d s)", prepared.name, prepared.timeout)
-        before = commands.git_snapshot(state["project"])
-        try:
-            outcome = commands.run_prepared(prepared)
-        except OSError as exc:
-            text = f"Command {prepared.name} could not start: {exc}"
-        else:
-            changed = commands.changed_between(before, commands.git_snapshot(state["project"]))
-            text = commands.summarize(prepared, outcome, changed)
-            log.info("%s exit=%s in %.0f s", prepared.name, outcome.exit_code, outcome.seconds)
+        text, _ = run_and_summarize(commands.Prepared(**state["prepared"]), state["project"])
         report: Report = {"role": "tester", "brief": state["brief"], "report": text}
         return {"reports": [report], "prepared": {}}
+
+    def verify(state: TeamState, config: RunnableConfig) -> dict:
+        """Run the project's verify commands after an approved batch.
+
+        In order, without asking (listing them in the project's config is the
+        user's approval), stopping at the first that fails or can't run.
+        """
+        project_config = commands.find_config(state["project"], projects_dir)
+        thread_id = config.get("configurable", {}).get("thread_id", "no-thread")
+        n = len(state.get("reports", []))
+        reports: list[Report] = []
+        for name in project_config.verify if project_config else []:
+            n += 1
+            try:
+                stem = commands.log_stem(thread_id, n, name)
+                prepared = commands.prepare(project_config, state["project"], name, {}, stem)
+            except commands.CommandError as exc:
+                text, ok = f"Not run: {exc}.", False
+            else:
+                text, ok = run_and_summarize(prepared, state["project"])
+            brief = f"Run automatically after the approved change: {name}"
+            reports.append({"role": "verify", "brief": brief, "report": text})
+            if not ok:
+                break
+        return {"reports": reports}
 
     graph = StateGraph(TeamState, input_schema=TeamInput)
     # No graph-level retries on model-driven nodes, so a failure never silently
@@ -564,7 +588,14 @@ def build(
         ["approve", "orchestrator"],
     )
     graph.add_edge("approve", "apply")
-    graph.add_edge("apply", "orchestrator")
+    graph.add_conditional_edges(
+        "apply",
+        lambda state: "verify" if state["approval"]["decision"] == "approve" else "orchestrator",
+        ["verify", "orchestrator"],
+    )
+    # Not retried, like run_command; a resume after a crash runs it again.
+    graph.add_node("verify", verify)
+    graph.add_edge("verify", "orchestrator")
     graph.add_node("tester", tester)
     graph.add_node("approve_command", approve_command)
     # Never retried: a command's failure is its result, not an error to repeat.
@@ -610,6 +641,19 @@ def ask_decision(question: dict) -> dict:
             **question,
             "question": f"{question['question']} (answer approve or reject; got {answer!r})",
         }
+
+
+def run_and_summarize(prepared: commands.Prepared, project: str) -> tuple[str, bool]:
+    """Run a checked command; return its report and whether it passed."""
+    log.info("running %s (time limit %d s)", prepared.name, prepared.timeout)
+    before = commands.git_snapshot(project)
+    try:
+        outcome = commands.run_prepared(prepared)
+    except OSError as exc:
+        return f"Command {prepared.name} could not start: {exc}", False
+    changed = commands.changed_between(before, commands.git_snapshot(project))
+    log.info("%s exit=%s in %.0f s", prepared.name, outcome.exit_code, outcome.seconds)
+    return commands.summarize(prepared, outcome, changed), commands.passed(prepared, outcome)
 
 
 def after_tester(state: TeamState) -> str:

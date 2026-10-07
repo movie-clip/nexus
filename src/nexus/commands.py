@@ -175,6 +175,8 @@ def describe(config: ProjectConfig | None) -> str:
     if config is None or not config.commands:
         return "No commands are configured for this project, so the tester can't run anything."
     lines = []
+    if config.verify:
+        lines.append(f"Run automatically after each approved change: {', '.join(config.verify)}")
     for name, spec in config.commands.items():
         lines.append(f"- {name}: {spec.description}")
         for pname, p in spec.params.items():
@@ -418,7 +420,7 @@ def summarize(cmd: Prepared, outcome: Outcome, changed: list[str]) -> str:
     lines = log_text.splitlines()
     out = [f"Command: {cmd.name}", f"Ran in: {cmd.cwd}", cmd.display()]
     problem = results_problem(cmd) if outcome.exit_code == 0 else None
-    ok = outcome.exit_code == 0 and problem is None
+    ok = passed(cmd, outcome)
     if outcome.exit_code is None:
         out.append(f"Result: TIMED OUT after {cmd.timeout} s (process tree killed)")
     else:
@@ -448,6 +450,10 @@ def summarize(cmd: Prepared, outcome: Outcome, changed: list[str]) -> str:
     out.extend(_cut(line) for line in tail)
     out.append(f"\nFull log: {cmd.log_file}")
     return "\n".join(out)
+
+
+def passed(cmd: Prepared, outcome: Outcome) -> bool:
+    return outcome.exit_code == 0 and results_problem(cmd) is None
 
 
 def results_problem(cmd: Prepared) -> str | None:
