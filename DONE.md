@@ -37,6 +37,8 @@ promise is proven by a test, not by a demo.
 | Without Langfuse keys nothing is traced; with them, a run and every step inside it (orchestrator, specialists, model and tool calls) is one trace, and a run and its resumes share a session | tracing tests with an in-memory exporter; first live trace, 2026-10-07 | E |
 | nexus's secrets (its `.env` keys and tokens, any `ANTHROPIC_*`) are masked before a span leaves the process | masking test with a secret in a tool result; live trace searched for every secret | E |
 | A Langfuse that is down or unreachable never fails or stalls a run | unreachable-endpoint test | E |
+| Deep Agents' own files (oversized messages and tool results, saved history) never reach the project or the engineer's batch: they are kept in memory, where the agent can still read them | offload tests with a 210k-character brief (failed before the fix) | pre-F |
+| A malformed approval answer asks the question again; it never fails the run or gets replayed | malformed-answer tests for batches and commands | pre-F |
 
 ## Pilot metrics (once a real pipeline exists)
 

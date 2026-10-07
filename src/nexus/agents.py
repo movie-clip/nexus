@@ -4,7 +4,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from deepagents import FilesystemPermission, create_deep_agent
-from deepagents.backends import FilesystemBackend
+from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware import AgentMiddleware, ModelRequest
 from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.language_models import BaseChatModel
@@ -17,6 +18,22 @@ WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete", "execute"})
 # The project's own agent instructions, loaded as memory when present, so nexus
 # itself carries nothing project-specific.
 MEMORY_FILES = ["/AGENTS.md", "/CLAUDE.md"]
+
+# Deep Agents writes its own files (oversized messages and tool results,
+# summarized history, binary blobs) through the backend directly, which
+# permissions don't cover. They go under the backend's artifacts root, so that
+# root is a folder kept in the agent's memory: nothing reaches the project, or
+# the engineer's batch, and the agent can still read them back.
+SCRATCH = "/.nexus-scratch/"
+
+
+def with_scratch(project_backend: BackendProtocol) -> CompositeBackend:
+    return CompositeBackend(
+        default=project_backend,
+        routes={SCRATCH: StateBackend()},
+        artifacts_root=SCRATCH.rstrip("/"),
+    )
+
 
 # Enforced at the tool layer, so they hold even if a model calls a hidden tool.
 READ_ONLY_PERMISSIONS = [
@@ -66,12 +83,13 @@ def read_only_agent(project: str, model: BaseChatModel, system_prompt: str, name
     * write tools are not offered, and every write is denied by permission
       anyway; subagents (the built-in ``task`` helper) inherit the rules;
     * there is no shell tool (Deep Agents only adds one for sandbox backends);
-    * ``.env`` files are unreadable.
+    * ``.env`` files are unreadable;
+    * Deep Agents' own files stay in memory (``SCRATCH``).
     """
     return create_deep_agent(
         model=model,
         system_prompt=system_prompt,
-        backend=FilesystemBackend(root_dir=project, virtual_mode=True),
+        backend=with_scratch(FilesystemBackend(root_dir=project, virtual_mode=True)),
         permissions=READ_ONLY_PERMISSIONS + NO_SECRETS_PERMISSIONS,
         middleware=[HideTools(WRITE_TOOLS)],
         memory=MEMORY_FILES,
@@ -91,13 +109,14 @@ def staged_engineer(project: str, staging_dir: str, model: BaseChatModel, system
     Its writes land in ``staging_dir`` (see ``nexus.staging``), never in the
     project; the caller collects them as one batch with ``backend.changes()``.
     It cannot write inside ``.git`` or to ``.env`` files, cannot read ``.env``
-    files, and has no shell. Returns ``(agent, backend)``.
+    files, and has no shell. Deep Agents' own files stay in memory
+    (``SCRATCH``), so they never join the batch. Returns ``(agent, backend)``.
     """
     backend = StagedBackend(project, staging_dir)
     agent = create_deep_agent(
         model=model,
         system_prompt=system_prompt,
-        backend=backend,
+        backend=with_scratch(backend),
         permissions=ENGINEER_PERMISSIONS + NO_SECRETS_PERMISSIONS,
         memory=MEMORY_FILES,
         name="engineer",
