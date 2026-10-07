@@ -9,3 +9,7 @@ dist/
 *.sqlite
 *.sqlite-*
 runs/
+
+# langgraph dev local data
+.langgraph_api/
+.env

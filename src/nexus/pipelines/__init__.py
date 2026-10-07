@@ -1,3 +1,1 @@
-"""Built-in pipelines. Importing this package registers them."""
-
-from nexus.pipelines import smoke  # noqa: F401
+"""Pipelines. Each module exports a compiled ``graph`` listed in langgraph.json."""

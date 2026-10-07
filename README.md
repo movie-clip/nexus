@@ -1,29 +1,50 @@
 # nexus
 
-A small engine for unattended, durable pipelines built on LangGraph.
-Background and the reasons for this design: `research/langgraph-standalone-app.md`.
-What "done" means: `DONE.md`.
+Pipelines built on LangGraph that you start by hand and that run to the end on
+their own, with retries, clear failure reports and (soon) resume.
+Background: `research/langgraph-standalone-app.md`. What "done" means: `DONE.md`.
 
-## Use
+The layout follows LangGraph's [application structure](https://docs.langchain.com/oss/python/langgraph/application-structure):
+each pipeline is a module exporting a compiled `graph`, listed in `langgraph.json`.
+The same graphs work in two ways:
+
+| | Command | Use it for |
+|---|---|---|
+| **Run** | `uv run python -m nexus.run --pipeline <name>` | doing the work: one run, result as JSON |
+| **Inspect** | `uv run langgraph dev` | developing: local API and Studio UI to watch and step through runs (in-memory, dev only) |
+
+## Run
 
 ```sh
 uv sync
 uv run pytest
 uv run python -m nexus.run --pipeline smoke --set scenario=flaky
+uv run python -m nexus.run --pipeline smoke --set fail_node=step_b --set fail_times=1
 ```
 
-The run logs one line per finished node to stderr and prints the final state as
-JSON to stdout. It exits 0 on success, 1 if the run recorded errors, and 2 on
-bad arguments or inputs.
+`--set key=value` sets a run input. Unknown keys and wrong types are refused
+before anything runs. Progress goes to stderr: one line per finished node or
+retry, plus the traceback once if the run fails. The result (`thread_id`,
+`status`, `state`, and `failed_node`/`error` on failure) goes to stdout as JSON.
+
+| Exit | Meaning |
+|---|---|
+| 0 | completed |
+| 1 | completed, but the run recorded errors in state |
+| 2 | bad arguments or inputs; nothing ran |
+| 3 | failed: a node raised and its retries ran out |
 
 ## Layout
 
 ```
+langgraph.json    graph name -> ./src/nexus/pipelines/<module>.py:graph
 src/nexus/
-  state.py        BaseState (errors, cost_usd, artifacts, retries, verdict) + retry helpers
-  registry.py     @register("name") for pipeline graph builders
-  run.py          CLI and run_pipeline(); validates inputs, compiles, streams
-  pipelines/      one module per pipeline; smoke.py is the engine's own test pipeline
+  state.py        BaseState: errors, cost_usd, artifacts, retries, verdict
+  retry.py        DEFAULT_RETRY (transient errors) and retry_update (capped "try again" routes)
+  run.py          the CLI: loads a graph from langgraph.json, validates inputs, runs, reports
+  errors.py       InputError
+  pipelines/
+    smoke.py      the engine's own test pipeline: routing scenarios and failure drills
 tests/
 ```
 
@@ -32,14 +53,16 @@ tests/
 1. Create `src/nexus/pipelines/<name>.py`.
 2. Define `<Name>Input(TypedDict)` with the run inputs, and
    `<Name>State(BaseState, <Name>Input)` with the working fields.
-3. Write a builder decorated with `@register("<name>")` that returns an
-   **uncompiled** `StateGraph(<Name>State, input_schema=<Name>Input)`. The
-   runner compiles it with the checkpointer.
-4. Import the module in `pipelines/__init__.py`.
+3. Build a plain `StateGraph(<Name>State, input_schema=<Name>Input)`, add each
+   node with `retry_policy=DEFAULT_RETRY`, and export `graph = build().compile(name="<name>")`
+   **without** a checkpointer. `langgraph dev` and `nexus.run` each add their own.
+4. Add `"<name>": "./src/nexus/pipelines/<name>.py:graph"` to `langgraph.json`.
 
 Rules:
 - Use plain code for deterministic steps, and LLM nodes only for judgment or wording.
-- Handle transient failures with `RetryPolicy` on the node. Model "try again"
-  decisions as a route capped with `retry_update`.
+- Transient failures (timeouts, 5xx) are retried by `DEFAULT_RETRY`: 3 attempts,
+  about 1s then 2s apart. Programming errors (`ValueError`, `KeyError`, ...) are
+  not retried. Model "try again" decisions as a route capped with `retry_update`.
 - Keep state small: store large data as files and keep only their paths in
   `artifacts`. Never put secrets in state.
+- Put secrets in `.env` (git-ignored).

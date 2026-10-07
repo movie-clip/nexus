@@ -17,6 +17,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "langgraph-cli[inmem]>=0.4.32",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]

@@ -3,24 +3,29 @@ import pytest
 from nexus.run import run_pipeline
 
 
-def run(scenario: str, **extra):
-    return run_pipeline("smoke", f"test-{scenario}", {"scenario": scenario, **extra})
+@pytest.fixture
+def run(smoke_graph):
+    def _run(scenario: str, **extra):
+        inputs = {"scenario": scenario, **extra}
+        return run_pipeline(smoke_graph, f"test-{scenario}", inputs).state
+
+    return _run
 
 
-def test_ok_goes_straight_to_finish():
+def test_ok_goes_straight_to_finish(run):
     final = run("ok")
     assert final["visited"] == ["step_a", "step_b", "check", "finish"]
     assert final["verdict"] == "ok"
     assert final.get("errors", []) == []
 
 
-def test_breach_routes_to_finish_with_breach_verdict():
+def test_breach_routes_to_finish_with_breach_verdict(run):
     final = run("breach")
     assert final["visited"] == ["step_a", "step_b", "check", "finish"]
     assert final["verdict"] == "breach"
 
 
-def test_flaky_retries_once_then_passes():
+def test_flaky_retries_once_then_passes(run):
     final = run("flaky")
     assert final["visited"] == ["step_a", "step_b", "check", "step_b", "check", "finish"]
     assert final["retries"] == {"check": 1}
@@ -28,7 +33,7 @@ def test_flaky_retries_once_then_passes():
 
 
 @pytest.mark.parametrize("limit", [0, 1, 3])
-def test_stuck_stops_at_retry_limit_and_records_error(limit):
+def test_stuck_stops_at_retry_limit_and_records_error(run, limit):
     final = run("stuck", max_retries=limit)
     assert final["visited"].count("check") == limit + 1
     assert final.get("retries", {}).get("check", 0) == limit

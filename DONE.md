@@ -12,7 +12,9 @@ promise is proven by a test, not by a demo.
 | Retries are capped per node in state, and a run that hits the cap ends with the error recorded | `stuck` scenario test, per-node retry test | 1 |
 | Bad inputs (unknown key, wrong type, engine field) are refused before the run starts | input validation tests | 1 |
 | Unattended runs log progress per node, key names only | progress log test | 1 |
-| A node that raises is retried with backoff (`RetryPolicy`); if it still fails, the CLI reports the thread and exits non-zero without a raw traceback | fault-injection tests | 2 |
+| Pipelines follow LangGraph's application structure: every graph in `langgraph.json` loads in `nexus.run` and in `langgraph dev` | loading test; manual `langgraph dev` check | 2 |
+| A node that raises a transient error is retried with backoff, one log line per retry; programming errors are not retried | failure drills via the smoke pipeline's `fail_*` inputs | 2 |
+| A failed run returns `status=failed`, the failed node and the error as JSON, keeps the work finished before the failure, logs the traceback once, and exits 3 | failure-report tests, subprocess test | 2 |
 | A run survives a crash: resume continues, finished nodes are not run again | kill-and-resume test, counting node calls | 3 |
 | `run` refuses a thread id that already exists (no piling onto old state); only `resume` continues one | existing-thread test | 3 |
 | A human gate pauses the run with no side effects, and `resume --decision` finishes it | approve and reject scenario tests | 4 |
