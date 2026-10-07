@@ -30,7 +30,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import AfterValidator, BaseModel, Field
 
 from nexus.agents import existing_dir, read_only_agent, run_agent
-from nexus.models import cost_usd, make_model
+from nexus.models import DEFAULT_MODEL, cost_usd, make_model
 from nexus.state import BaseState
 
 log = logging.getLogger("nexus.team")
@@ -46,7 +46,7 @@ class Role:
 
 
 ORCHESTRATOR = Role(
-    model="claude-opus-5-5",
+    model=DEFAULT_MODEL,
     effort="high",
     prompt="""\
 You lead a small team answering an engineering request about a software \
@@ -85,9 +85,10 @@ finish, otherwise "").""",
 )
 
 SPECIALISTS: dict[str, Role] = {
-    # Sonnet 5.5 for the scout: most of its work is reading and searching.
+    # Every role is on DEFAULT_MODEL (Sonnet 5.5) during development. When
+    # tuning, the scout can stay on Sonnet: most of its work is reading.
     "scout": Role(
-        model="claude-sonnet-5-5",
+        model=DEFAULT_MODEL,
         effort="medium",
         prompt="""\
 You are the scout on an engineering team. Explore the project in your \
@@ -101,7 +102,7 @@ has not seen the files, so be complete but concise.
 You have read-only access and cannot change files.""",
     ),
     "reviewer": Role(
-        model="claude-opus-5-5",
+        model=DEFAULT_MODEL,
         effort="high",
         prompt="""\
 You are the reviewer on an engineering team. You are given a draft answer or a \

@@ -154,9 +154,9 @@ def test_bad_max_rounds_rejected(project, bad):
 
 
 def test_role_models():
-    assert team.ORCHESTRATOR.model == "claude-opus-5-5"
-    assert team.SPECIALISTS["scout"].model == "claude-sonnet-5-5"  # the user's choice
-    assert team.SPECIALISTS["reviewer"].model == "claude-opus-5-5"
+    # The user's choice during development: every role on Sonnet 5.5.
+    assert team.ORCHESTRATOR.model == "claude-sonnet-5-5"
+    assert all(spec.model == "claude-sonnet-5-5" for spec in team.SPECIALISTS.values())
     for role in ["orchestrator", *team.SPECIALISTS]:
         assert (
             team.default_model(role).model

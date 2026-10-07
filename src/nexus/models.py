@@ -13,7 +13,10 @@ from langchain_core.messages.ai import UsageMetadata
 
 log = logging.getLogger("nexus.models")
 
-DEFAULT_MODEL = "claude-opus-5-5"
+# Every role uses this while nexus is being developed, to keep costs down
+# (the user's choice, 2026-10-07). Per-role models get tuned once nexus is done:
+# each role names its model in pipelines/team.py.
+DEFAULT_MODEL = "claude-sonnet-5-5"
 
 
 @dataclass(frozen=True)
@@ -47,8 +50,9 @@ UNKNOWN_PRICE = max(PRICES.values(), key=lambda p: p.output)
 def make_model(model: str = DEFAULT_MODEL, effort: str = "high") -> ChatAnthropic:
     """A ChatAnthropic client with nexus defaults.
 
-    * ``effort`` is set explicitly: Opus 5.5 defaults to ``medium``, and its
-      thinking can't be turned off, so effort is the only depth control.
+    * ``effort`` is set explicitly. Sonnet 5.5 and Opus 5.5 can't turn
+      thinking off, so effort is the depth control, and their defaults differ
+      (Sonnet ``high``, Opus ``medium``).
     * Server-side refusal fallbacks are on: if a safety classifier declines a
       request, the API re-runs it on a fallback model instead of stopping.
     * The SDK already retries 429, 5xx and connection errors per API call.
