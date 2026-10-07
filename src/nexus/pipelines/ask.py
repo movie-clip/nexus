@@ -3,8 +3,8 @@
     START -> answer -> END
 
 One Deep Agent explores the project with read-only file tools (ls, read_file,
-glob, grep, plus `task` for a helper subagent with the same limits) and
-answers in text. See ``nexus.agents.read_only_agent`` for what it cannot do.
+glob, grep) in at most ``MAX_MODEL_CALLS`` model calls, and answers in text.
+See ``nexus.agents.read_only_agent`` for what it cannot do.
 The ``team`` pipeline answers the same requests with an orchestrator and
 specialist roles.
 """
