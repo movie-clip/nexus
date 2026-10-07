@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+dist/
+
+# Runtime output (checkpoints, artifacts)
+*.sqlite
+*.sqlite-*
+runs/
