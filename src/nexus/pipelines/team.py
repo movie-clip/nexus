@@ -50,7 +50,13 @@ from langgraph.types import interrupt
 from pydantic import AfterValidator, BaseModel, Field
 
 from nexus import commands
-from nexus.agents import existing_dir, read_only_agent, run_agent, staged_engineer
+from nexus.agents import (
+    StepLimit,
+    existing_dir,
+    read_only_agent,
+    run_agent,
+    staged_engineer,
+)
 from nexus.models import DEFAULT_MODEL, cost_usd, make_model
 from nexus.staging import Change, apply_changes
 from nexus.state import BaseState
@@ -65,11 +71,15 @@ class Role:
     model: str
     effort: str
     prompt: str
+    # Model calls one dispatch may take; the last one writes the report.
+    # Simple fact-finding takes 3-10 (Anthropic's guide); the cap is for runaways.
+    max_model_calls: int
 
 
 ORCHESTRATOR = Role(
     model=DEFAULT_MODEL,
     effort="high",
+    max_model_calls=1,  # one structured call per round
     prompt="""\
 You lead a small team handling an engineering request about a software \
 project. You cannot read or change the project yourself; your specialists can. \
@@ -137,6 +147,7 @@ READ_ONLY_SPECIALISTS: dict[str, Role] = {
     "scout": Role(
         model=DEFAULT_MODEL,
         effort="medium",
+        max_model_calls=30,
         prompt="""\
 You are the scout on an engineering team. Explore the project in your \
 filesystem (`/` is the project root) to answer the brief you are given.
@@ -151,6 +162,7 @@ You have read-only access and cannot change files.""",
     "reviewer": Role(
         model=DEFAULT_MODEL,
         effort="high",
+        max_model_calls=30,
         prompt="""\
 You are the reviewer on an engineering team. You are given a draft answer, a \
 list of claims, or a description of a change already applied to the project in \
@@ -170,6 +182,7 @@ You have read-only access and cannot change files.""",
 ENGINEER = Role(
     model=DEFAULT_MODEL,
     effort="high",
+    max_model_calls=60,
     prompt="""\
 You are the engineer on an engineering team. Make the change described in \
 your brief to the project in your filesystem (`/` is the project root).
@@ -362,8 +375,9 @@ def build(
         spec = READ_ONLY_SPECIALISTS[role]
 
         def node(state: TeamState) -> dict:
-            agent = read_only_agent(state["project"], model_for(role), spec.prompt, name=role)
-            text, cost = run_agent(agent, state["brief"])
+            limit = StepLimit(spec.max_model_calls)
+            agent = read_only_agent(state["project"], model_for(role), spec.prompt, role, limit)
+            text, cost = run_agent(agent, state["brief"], limit)
             report: Report = {"role": role, "brief": state["brief"], "report": text}
             return {"reports": [report], "cost_usd": cost}
 
@@ -371,10 +385,11 @@ def build(
 
     def engineer(state: TeamState) -> dict:
         with tempfile.TemporaryDirectory(prefix="nexus-staging-") as staging:
+            limit = StepLimit(ENGINEER.max_model_calls)
             agent, backend = staged_engineer(
-                state["project"], staging, model_for("engineer"), ENGINEER.prompt
+                state["project"], staging, model_for("engineer"), ENGINEER.prompt, limit
             )
-            text, cost = run_agent(agent, state["brief"])
+            text, cost = run_agent(agent, state["brief"], limit)
             batch = [asdict(change) for change in backend.changes()]
         files = ", ".join(c["path"] for c in batch) or "none"
         report: Report = {

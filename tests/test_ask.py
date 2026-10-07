@@ -6,6 +6,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.ai import UsageMetadata
 
+from nexus.agents import StepLimit
 from nexus.errors import InputError
 from nexus.models import PRICES, UNKNOWN_PRICE, cost_usd
 from nexus.pipelines import ask
@@ -14,7 +15,7 @@ from tests.fakes import MODEL, final, scripted, tool_call
 
 
 def run_agent(project, model):
-    out = ask.build_agent(str(project), model).invoke(
+    out = ask.build_agent(str(project), model, StepLimit(ask.MAX_MODEL_CALLS)).invoke(
         {"messages": [{"role": "user", "content": "go"}]}
     )
     return out["messages"]
@@ -53,11 +54,35 @@ def test_write_tools_are_not_offered_and_no_shell_exists(project):
     assert not offered & {"write_file", "edit_file", "delete", "execute"}
 
 
-def test_hidden_write_tool_is_still_denied_if_called(project):
-    model = scripted(tool_call("write_file", file_path="/new.txt", content="x"), final("tried"))
-    messages = run_agent(project, model)
+@pytest.mark.parametrize(
+    ("name", "args"),
+    [
+        ("write_file", {"file_path": "/new.txt", "content": "x"}),
+        ("task", {"description": "write /new.txt", "subagent_type": "general-purpose"}),
+    ],
+)
+def test_hidden_tools_are_refused_if_called(project, name, args):
+    messages = run_agent(project, scripted(tool_call(name, **args), final("tried")))
+    assert tool_results(messages)[0] == f"Error: the {name} tool is not available."
     assert not (project / "new.txt").exists()
-    assert tool_results(messages)[0] == "Error: permission denied for write on /new.txt"
+
+
+def test_read_only_permissions_deny_writes_on_their_own(project):
+    """The second layer: without HideTools, the permission rule still denies."""
+    from deepagents import create_deep_agent
+    from deepagents.backends import FilesystemBackend
+
+    from nexus.agents import READ_ONLY_PERMISSIONS
+
+    model = scripted(tool_call("write_file", file_path="/new.txt", content="x"), final("tried"))
+    agent = create_deep_agent(
+        model=model,
+        backend=FilesystemBackend(root_dir=project, virtual_mode=True),
+        permissions=READ_ONLY_PERMISSIONS,
+    )
+    out = agent.invoke({"messages": [{"role": "user", "content": "go"}]})
+    assert tool_results(out["messages"])[0] == "Error: permission denied for write on /new.txt"
+    assert not (project / "new.txt").exists()
 
 
 @pytest.mark.parametrize("path", ["/../outside.txt", "../outside.txt"])

@@ -163,14 +163,18 @@ def test_diff_marks_new_and_deleted_files():
 def test_engineer_tool_limits(project, tmp_path, call, error):
     from langchain_core.messages import ToolMessage
 
-    from nexus.agents import staged_engineer
+    from nexus.agents import StepLimit, staged_engineer
 
     (project / ".git").mkdir()
     (project / ".env").write_text("K=1")
     name, path = call
     args = {"file_path": path} | ({"content": "x"} if name == "write_file" else {})
     agent, backend = staged_engineer(
-        str(project), str(tmp_path / "stage"), scripted(tool_call(name, **args), final("ok")), "x"
+        str(project),
+        str(tmp_path / "stage"),
+        scripted(tool_call(name, **args), final("ok")),
+        "x",
+        StepLimit(5),
     )
     out = agent.invoke({"messages": [{"role": "user", "content": "go"}]})
     assert [m.text for m in out["messages"] if isinstance(m, ToolMessage)] == [error]

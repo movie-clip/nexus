@@ -158,6 +158,8 @@ def test_role_models():
     # The user's choice during development: every role on Sonnet 5.5.
     assert team.ORCHESTRATOR.model == "claude-sonnet-5-5"
     assert all(team.role_spec(r).model == "claude-sonnet-5-5" for r in team.SPECIALISTS)
+    limits = {r: team.role_spec(r).max_model_calls for r in ["orchestrator", *team.SPECIALISTS]}
+    assert limits == {"orchestrator": 1, "scout": 30, "reviewer": 30, "engineer": 60}
     for role in ["orchestrator", *team.SPECIALISTS]:
         model = team.default_model(role)
         assert isinstance(model, ChatAnthropic)

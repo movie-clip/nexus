@@ -16,7 +16,7 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 from pydantic import AfterValidator
 
-from nexus.agents import existing_dir, read_only_agent, run_agent
+from nexus.agents import StepLimit, existing_dir, read_only_agent, run_agent
 from nexus.models import make_model
 from nexus.state import BaseState
 
@@ -46,13 +46,19 @@ class AskState(BaseState, total=False):
     answer: str
 
 
-def build_agent(project: str, model: BaseChatModel):
-    return read_only_agent(project, model, SYSTEM_PROMPT, name="ask")
+# Model calls one answer may take; the last one writes the answer.
+MAX_MODEL_CALLS = 30
+
+
+def build_agent(project: str, model: BaseChatModel, limit: StepLimit):
+    return read_only_agent(project, model, SYSTEM_PROMPT, name="ask", limit=limit)
 
 
 def build(model_factory: Callable[[], BaseChatModel] = make_model) -> StateGraph:
     def answer(state: AskState) -> dict:
-        text, cost = run_agent(build_agent(state["project"], model_factory()), state["request"])
+        limit = StepLimit(MAX_MODEL_CALLS)
+        agent = build_agent(state["project"], model_factory(), limit)
+        text, cost = run_agent(agent, state["request"], limit)
         return {"answer": text, "cost_usd": cost}
 
     graph = StateGraph(AskState, input_schema=AskInput)

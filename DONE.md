@@ -39,6 +39,8 @@ promise is proven by a test, not by a demo.
 | A Langfuse that is down or unreachable never fails or stalls a run | unreachable-endpoint test | E |
 | Deep Agents' own files (oversized messages and tool results, saved history) never reach the project or the engineer's batch: they are kept in memory, where the agent can still read them | offload tests with a 210k-character brief (failed before the fix) | pre-F |
 | A malformed approval answer asks the question again; it never fails the run or gets replayed | malformed-answer tests for batches and commands | pre-F |
+| Each specialist has a model-call limit (scout and reviewer 30, engineer 60, ask 30): the last call may not use tools and is told to write its report, a model that ignores that is stopped anyway, and the report says it was cut short | step-limit tests; live `tool_choice: none` call after tool use, 2026-10-07 | pre-F |
+| Specialists can't start Deep Agents' sub-subagents (`task`), whose calls no limit would count: the tool is not offered and is refused if called | hidden-tool tests | pre-F |
 
 ## Pilot metrics (once a real pipeline exists)
 

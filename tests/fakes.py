@@ -11,10 +11,12 @@ class ScriptedModel(GenericFakeChatModel):
     """Replays fixed AI messages and records what the agent sent it."""
 
     seen_tools: list[list[str]] = []
+    seen_tool_choice: list = []
     seen_prompts: list[list] = []
 
     def bind_tools(self, tools, **kwargs):
         self.seen_tools.append([getattr(t, "name", None) or t.get("name") for t in tools])
+        self.seen_tool_choice.append(kwargs.get("tool_choice"))
         return self
 
     def _generate(self, messages, *args, **kwargs):
@@ -24,7 +26,7 @@ class ScriptedModel(GenericFakeChatModel):
 
 def scripted(*steps: AIMessage) -> ScriptedModel:
     model = ScriptedModel(messages=iter(steps))
-    model.seen_tools, model.seen_prompts = [], []
+    model.seen_tools, model.seen_tool_choice, model.seen_prompts = [], [], []
     return model
 
 
