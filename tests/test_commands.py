@@ -372,6 +372,39 @@ def test_long_error_and_failure_lists_are_cut(tmp_path):
     assert "... and 3 more failures" in report
 
 
+def results_command(tmp_path, results: str | None) -> Prepared:
+    """A command that passes {results_file}; ``results`` is what it left there."""
+    log = tmp_path / "x.log"
+    log.write_text("done\n")
+    file = tmp_path / "r.xml"
+    if results is not None:
+        file.write_text(results)
+    return Prepared("t", [["x", "-r", str(file)]], str(tmp_path), 5, "auto", str(file), str(log))
+
+
+@pytest.mark.parametrize(
+    ("results", "problem"),
+    [
+        # Unity's launcher returned before Unity had run the tests.
+        (None, "no test results were written, so the tests did not run or did not finish"),
+        # Unity exits 0 when the filter matches no test.
+        ('<test-run total="0" passed="0" failed="0" skipped="0"/>', "no tests ran"),
+        ("<test-run", "the test results file could not be read"),
+    ],
+)
+def test_exit_0_without_test_results_is_a_failure(tmp_path, results, problem):
+    report = commands.summarize(results_command(tmp_path, results), Outcome(0, 1, 1), [])
+    assert f"Result: FAILED, exit code 0, after 1 s: {problem}" in report
+    assert "succeeded" not in report
+
+
+def test_exit_0_with_tests_run_succeeds(tmp_path):
+    results = '<test-run total="2" passed="2" failed="0" skipped="0"/>'
+    report = commands.summarize(results_command(tmp_path, results), Outcome(0, 1, 1), [])
+    assert "Result: succeeded, exit code 0, after 1 s" in report
+    assert "Tests: 2 run, 2 passed" in report
+
+
 def test_unreadable_or_foreign_results_files(tmp_path):
     broken = tmp_path / "broken.xml"
     broken.write_text("<test-run")

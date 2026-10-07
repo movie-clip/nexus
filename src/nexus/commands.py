@@ -19,8 +19,10 @@ filled from values the orchestrator chose; each value must fully match its
 param's ``pattern``, so it can't smuggle in extra arguments or commands. A
 nested list is an optional group, left out unless every placeholder in it has
 a value. ``{results_file}`` is a path nexus provides outside the project for a
-test-results file (NUnit XML is summarized). ``steps = [[...], [...]]`` runs
-several commands in order, stopping at the first that fails.
+test-results file (NUnit XML is summarized). A command given it must write it:
+exit code 0 with no results, or with 0 tests run, is reported as a failure.
+``steps = [[...], [...]]`` runs several commands in order, stopping at the
+first that fails.
 
 Commands run with nexus's own secrets (the names in nexus's ``.env`` and any
 ``ANTHROPIC_*`` variable) removed from their environment, with no input, and
@@ -394,13 +396,14 @@ def summarize(cmd: Prepared, outcome: Outcome, changed: list[str]) -> str:
     log_text = Path(cmd.log_file).read_bytes().decode("utf-8", "replace")
     lines = log_text.splitlines()
     out = [f"Command: {cmd.name}", f"Ran in: {cmd.cwd}", cmd.display()]
+    problem = results_problem(cmd) if outcome.exit_code == 0 else None
+    ok = outcome.exit_code == 0 and problem is None
     if outcome.exit_code is None:
         out.append(f"Result: TIMED OUT after {cmd.timeout} s (process tree killed)")
     else:
-        verdict = "succeeded" if outcome.exit_code == 0 else "FAILED"
-        out.append(
-            f"Result: {verdict}, exit code {outcome.exit_code}, after {outcome.seconds:.0f} s"
-        )
+        verdict = "succeeded" if ok else "FAILED"
+        result = f"Result: {verdict}, exit code {outcome.exit_code}, after {outcome.seconds:.0f} s"
+        out.append(f"{result}: {problem}" if problem else result)
     if len(cmd.steps) > 1:
         out.append(f"Steps run: {outcome.steps_run} of {len(cmd.steps)}")
 
@@ -419,11 +422,33 @@ def summarize(cmd: Prepared, outcome: Outcome, changed: list[str]) -> str:
         "\nFiles git reports as changed by this command: "
         + (", ".join(changed) if changed else "none")
     )
-    tail = lines[-(TAIL_LINES_OK if outcome.exit_code == 0 else TAIL_LINES) :]
+    tail = lines[-(TAIL_LINES_OK if ok else TAIL_LINES) :]
     out.append(f"\nLast {len(tail)} lines of output:")
     out.extend(_cut(line) for line in tail)
     out.append(f"\nFull log: {cmd.log_file}")
     return "\n".join(out)
+
+
+def results_problem(cmd: Prepared) -> str | None:
+    """Why a command that exited 0 still didn't show its tests passed, or None.
+
+    Only for commands given ``{results_file}``: a test run that finishes writes
+    it, so a missing, unreadable or empty one means the tests never really ran
+    (e.g. a launcher returned before the test runner did, or the filter matched
+    nothing; Unity exits 0 for both).
+    """
+    if not any(cmd.results_file in arg for step in cmd.steps for arg in step):
+        return None
+    file = Path(cmd.results_file)
+    if not file.is_file():
+        return "no test results were written, so the tests did not run or did not finish"
+    try:
+        root = ET.parse(file).getroot()
+    except ET.ParseError:
+        return "the test results file could not be read"
+    if root.tag == "test-run" and root.get("total") == "0":
+        return "no tests ran; does the filter match any test?"
+    return None
 
 
 def nunit_summary(file: Path) -> str | None:

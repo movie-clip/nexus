@@ -127,6 +127,10 @@ filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*", description = "..." }
   tests from an NUnit results file (`{results_file}`, written outside the
   project), the files `git status` shows the command changed, and the end of
   the output (40 lines after a failure, 10 after a success).
+- A command given `{results_file}` must write it. If it exits 0 but wrote no
+  results file, an unreadable one, or one with 0 tests run, the report says
+  FAILED and why: the tests didn't run or didn't finish (a launcher that
+  returns early), or the filter matched nothing (Unity exits 0 for that too).
 
 ## Tracing
 
