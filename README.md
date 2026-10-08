@@ -72,14 +72,17 @@ request -> orchestrator -+- scout -----------------------------------+
   A run waiting for your approval needs `--decision` first, and a failed run
   needs a plain resume first.
 - Spending is capped three ways:
-  - at most `--max-rounds` specialist and tester rounds (default 6);
-  - at most `--budget` US dollars per run (default 2), checked before each
-    round, so a run can only go over by the round that crossed it;
+  - at most `--max-rounds` specialist and tester rounds per request
+    (default 6);
+  - at most `--budget` US dollars per request (default 2), checked before
+    each round, so a request can only go over by the round that crossed it;
   - each specialist gets a number of model calls (scout and reviewer 30,
     engineer 60, `--pipeline ask` 30). On the last one it can't use tools and
     must write its report, which then says it was cut short.
 
-  When rounds or budget run out, the only choice offered is "finish".
+  When rounds or budget run out, the only choice offered is "finish". Each
+  follow-up is a new request with its own rounds and budget; the printed cost
+  is the whole run's, plus this request's after a follow-up.
 - Every model call is logged with its cost as it ends, e.g.
   `model call 7 (scout): $0.0312, run so far $0.4123`. A failed run also shows
   what the failed step spent, which isn't part of the run's recorded cost.

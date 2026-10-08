@@ -156,3 +156,12 @@ def test_a_failed_run_shows_what_the_attempt_spent(cli, monkeypatch, project, ca
     assert nexus_cli.show(failed) == 3
     err = capsys.readouterr().err
     assert "[failed] thread=t cost=$0.2500 (this attempt spent $0.4000" in err
+
+
+def test_a_follow_up_shows_what_this_request_cost(cli, capsys):
+    from nexus.run import RunResult
+
+    turn = {"request": "q", "answer": "a", "reports_at_end": 2, "cost_at_end": 0.75}
+    state = {"cost_usd": 0.9, "turns": [turn], "answer": "Done."}
+    assert nexus_cli.show(RunResult("t", "completed", state)) == 0
+    assert "[completed] thread=t cost=$0.9000 (this request $0.1500)" in capsys.readouterr().err

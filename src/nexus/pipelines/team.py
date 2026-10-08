@@ -73,9 +73,10 @@ from nexus.state import BaseState
 log = logging.getLogger("nexus.team")
 
 DEFAULT_MAX_ROUNDS = 6
-# US dollars one run may spend (the user's choice, 2026-10-07). Checked before
-# each round, so a run can go over by at most the round that crossed it, which
-# its specialist's step limit bounds.
+# US dollars one request may spend (the user's choice, 2026-10-07; a follow-up
+# is a new request, 2026-10-08). Checked before each round, so a request can go
+# over by at most the round that crossed it, which its specialist's step limit
+# bounds.
 DEFAULT_BUDGET_USD = 2.0
 
 
@@ -122,12 +123,12 @@ arrive as reports from "verify".
 
 Follow-ups: when <earlier_turns> is present, the user is continuing a \
 conversation with you: <request> is their new message and may refer to your \
-earlier answers (approving a plan you proposed, say). Reports from earlier \
-turns are still evidence, but files changed by approved batches since then \
-may differ from what those reports saw.
+earlier answers (approving a plan you proposed, say). Each report names the \
+turn it was for. Reports from earlier turns are still evidence, but files \
+changed by approved batches since then may differ from what those reports saw.
 
-Limits: <rounds_left> is how many more steps you may take, and <budget> what \
-the run has spent and has left, in US dollars. When either runs out, only \
+Limits: <rounds_left> is how many more steps you may take for this request, \
+and <budget> what this request has spent and has left, in US dollars. When either runs out, only \
 finish is offered, so plan to answer within them.
 
 How to decide:
@@ -270,10 +271,16 @@ class ChangeDict(TypedDict):
 
 
 class Turn(TypedDict):
-    """A request the team finished, and its answer."""
+    """A request the team finished, and its answer.
+
+    The run's report count and cost when it finished are where the next turn's
+    rounds and budget start: each request gets its own.
+    """
 
     request: str
     answer: str
+    reports_at_end: int
+    cost_at_end: float
 
 
 class TeamInput(TypedDict):
@@ -315,14 +322,22 @@ def default_model(role: str) -> BaseChatModel:
     return make_model(spec.model, effort=spec.effort)
 
 
+def turn_start(state: TeamState) -> tuple[int, float]:
+    """The run's report count and cost when the current request began."""
+    turns = state.get("turns", [])
+    return (turns[-1]["reports_at_end"], turns[-1]["cost_at_end"]) if turns else (0, 0.0)
+
+
 def rounds_used(state: TeamState) -> int:
-    """Dispatches the orchestrator chose; approval outcomes and verify runs don't count."""
-    return sum(1 for r in state.get("reports", []) if r["role"] not in ("user", "verify"))
+    """Dispatches the orchestrator chose for the current request; approval
+    outcomes and verify runs don't count."""
+    reports = state.get("reports", [])[turn_start(state)[0] :]
+    return sum(1 for r in reports if r["role"] not in ("user", "verify"))
 
 
 @dataclass(frozen=True)
 class Limits:
-    """What the run may still do: rounds and money."""
+    """What the current request may still do: rounds and money."""
 
     rounds_left: int
     spent_usd: float
@@ -332,7 +347,7 @@ class Limits:
     def of(cls, state: TeamState) -> "Limits":
         rounds_left = max(state.get("max_rounds", DEFAULT_MAX_ROUNDS) - rounds_used(state), 0)
         budget = state.get("max_cost_usd", DEFAULT_BUDGET_USD)
-        return cls(rounds_left, state.get("cost_usd", 0.0), budget)
+        return cls(rounds_left, state.get("cost_usd", 0.0) - turn_start(state)[1], budget)
 
     @property
     def money_left(self) -> float:
@@ -365,8 +380,10 @@ def orchestrator_message(state: TeamState, limits: Limits, commands_text: str) -
     if reports:
         parts.append("<reports>")
         for i, r in enumerate(reports, 1):
+            # After a follow-up, each report names the request it was for.
+            tag = f' turn="{1 + sum(t["reports_at_end"] < i for t in turns)}"' if turns else ""
             parts.append(
-                f'<report n="{i}" role="{r["role"]}">\n'
+                f'<report n="{i}" role="{r["role"]}"{tag}>\n'
                 f"<brief>\n{r['brief']}\n</brief>\n<result>\n{r['report']}\n</result>\n</report>"
             )
         parts.append("</reports>")
@@ -473,7 +490,12 @@ def build(
         """Start a follow-up: the finished request and its answer become a turn."""
         if not state.get("answer"):
             raise ValueError("a follow-up needs a finished request to follow")
-        turn: Turn = {"request": state["request"], "answer": state["answer"]}
+        turn: Turn = {
+            "request": state["request"],
+            "answer": state["answer"],
+            "reports_at_end": len(state.get("reports", [])),
+            "cost_at_end": state.get("cost_usd", 0.0),
+        }
         log.info("follow-up to turn %d", len(state.get("turns", [])) + 1)
         return {"turns": [turn], "request": state["follow_up"], "follow_up": "", "answer": ""}
 

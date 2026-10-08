@@ -2,6 +2,7 @@
 
 import pytest
 
+from nexus.models import PRICES
 from nexus.pipelines import team
 from nexus.run import open_runs_db, resume_pipeline, run_pipeline
 from tests.fakes import ScriptedOrchestrator, decide, final, scripted
@@ -50,7 +51,14 @@ def test_a_follow_up_sees_the_conversation_and_every_report(project):
     assert result.status == "completed"
     assert result.state["answer"] == "Noted."
     assert result.state["request"] == "Go with step 1."
-    assert result.state["turns"] == [{"request": REQUEST, "answer": "PLAN: 1. raise Speed."}]
+    assert result.state["turns"] == [
+        {
+            "request": REQUEST,
+            "answer": "PLAN: 1. raise Speed.",
+            "reports_at_end": 1,
+            "cost_at_end": 0,
+        }
+    ]
     sent = user_text(orch.calls[-1][1])
     for earlier in (REQUEST, "PLAN: 1. raise Speed.", "SCOUT-REPORT"):
         assert earlier in sent
@@ -81,9 +89,9 @@ def test_every_turn_is_kept_in_order(project):
     start(project, graph)
     follow_up(graph, "Q2")
     result = follow_up(graph, "Q3")
-    assert result.state["turns"] == [
-        {"request": REQUEST, "answer": "A1"},
-        {"request": "Q2", "answer": "A2"},
+    assert [(t["request"], t["answer"]) for t in result.state["turns"]] == [
+        (REQUEST, "A1"),
+        ("Q2", "A2"),
     ]
     assert result.state["answer"] == "A3"
 
@@ -94,3 +102,42 @@ def test_a_new_run_cannot_start_with_a_follow_up(project):
     result = run_pipeline(graph, "t", inputs, open_runs_db())
     assert result.status == "failed"
     assert "a follow-up needs a finished request" in str(result.error)
+
+
+def test_each_follow_up_gets_its_own_rounds_and_budget(project):
+    orch = ScriptedOrchestrator(
+        decide("scout", brief="Read Jump.cs."),
+        decide("finish", answer="PLAN"),
+        decide("scout", brief="Check the plan's first step."),
+        decide("finish", answer="Done"),
+    )
+    # $0.10 of output at Sonnet 5.5's rate, then a free report.
+    scouts = [scripted(final("R1", 0, 10_000, model="claude-sonnet-5-5")), scripted(final("R2"))]
+    graph = make_graph(orch, {"scout": scouts})
+    inputs = {"request": REQUEST, "project": str(project), "max_rounds": 1, "max_cost_usd": 0.15}
+    run_pipeline(graph, "t", inputs, open_runs_db())
+
+    result = follow_up(graph, "Go.")
+    schemas = [schema for schema, _ in orch.calls]
+    assert schemas == [team.Decision, team.FinalDecision, team.Decision, team.FinalDecision]
+    first_of_follow_up = user_text(orch.calls[2][1])
+    assert "<rounds_left>1</rounds_left>" in first_of_follow_up
+    assert "<budget>spent $0.00 of $0.15; $0.15 left</budget>" in first_of_follow_up
+    # The run's cost still counts every turn.
+    assert result.state["cost_usd"] == pytest.approx(0.01 * PRICES["claude-sonnet-5-5"].output)
+
+
+def test_reports_say_which_turn_they_came_from(project):
+    orch = ScriptedOrchestrator(
+        decide("scout", brief="Read Jump.cs."),
+        decide("finish", answer="PLAN"),
+        decide("scout", brief="Check it."),
+        decide("finish", answer="Done"),
+    )
+    graph = make_graph(orch, {"scout": [scripted(final("R1")), scripted(final("R2"))]})
+    start(project, graph)
+    follow_up(graph, "Go.")
+    first_run, last = user_text(orch.calls[1][1]), user_text(orch.calls[-1][1])
+    assert '<report n="1" role="scout">' in first_run  # one turn so far: no tag
+    assert '<report n="1" role="scout" turn="1">' in last
+    assert '<report n="2" role="scout" turn="2">' in last

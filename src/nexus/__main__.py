@@ -23,6 +23,7 @@ import logging
 import sys
 from dataclasses import asdict
 from datetime import datetime
+from typing import cast
 
 from nexus.errors import InputError
 from nexus.pipelines import ask, team
@@ -41,13 +42,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-rounds",
         type=int,
-        help=f"team only: specialist rounds allowed (default {team.DEFAULT_MAX_ROUNDS})",
+        help=f"team only: specialist rounds per request (default {team.DEFAULT_MAX_ROUNDS})",
     )
     parser.add_argument(
         "--budget",
         type=float,
         metavar="USD",
-        help=f"team only: US dollars the run may spend (default {team.DEFAULT_BUDGET_USD:g})",
+        help=f"team only: US dollars each request may spend (default {team.DEFAULT_BUDGET_USD:g})",
     )
     parser.add_argument("--thread", help="thread id (default: <pipeline>-<timestamp>)")
     parser.add_argument("--json", action="store_true", help="print the full run result as JSON")
@@ -86,6 +87,11 @@ def show(result: RunResult, as_json: bool = False) -> int:
         print(asked.get("diff") or asked.get("command", ""))
     cost = result.state.get("cost_usd", 0.0)
     line = f"\n[{result.status}] thread={result.thread_id} cost=${cost:.4f}"
+    if result.state.get("turns"):
+        # A follow-up (only team runs have turns): the run's cost counts every
+        # turn; show this request's too.
+        state = cast(team.TeamState, result.state)
+        line += f" (this request ${team.Limits.of(state).spent_usd:.4f})"
     if result.status == "failed":
         # The failed step's spending is not in the run's cost; show it.
         line += f" (this attempt spent ${result.spent_usd:.4f}, the failed step included)"
