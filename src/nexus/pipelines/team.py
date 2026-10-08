@@ -19,6 +19,12 @@ comes back as JSON enforced by the API's structured output, and LangGraph routes
 on it in plain code. When no rounds are left, the only schema offered is
 "finish", so the round cap holds no matter what the model would prefer.
 
+A finished run takes follow-up messages (``nexus.resume --message``): each is
+new input on the same thread, as ``follow_up``. START then goes through
+``next_turn``, which keeps the finished request and its answer in ``turns`` and
+makes the message the request; the orchestrator sees the earlier turns and
+every report since the run began.
+
 Scout and reviewer are read-only Deep Agents (``nexus.agents.read_only_agent``).
 The engineer's writes are staged (``nexus.staging``): when it is done, the run
 pauses at ``approve`` and shows the whole batch as one diff. The user approves
@@ -113,6 +119,12 @@ approve the run, and may reject it with a note. Commands listed as run \
 automatically after each approved change need no tester round: their results \
 arrive as reports from "verify".
 - finish: you write the final answer to the user.
+
+Follow-ups: when <earlier_turns> is present, the user is continuing a \
+conversation with you: <request> is their new message and may refer to your \
+earlier answers (approving a plan you proposed, say). Reports from earlier \
+turns are still evidence, but files changed by approved batches since then \
+may differ from what those reports saw.
 
 Limits: <rounds_left> is how many more steps you may take, and <budget> what \
 the run has spent and has left, in US dollars. When either runs out, only \
@@ -257,11 +269,21 @@ class ChangeDict(TypedDict):
     after: str | None
 
 
+class Turn(TypedDict):
+    """A request the team finished, and its answer."""
+
+    request: str
+    answer: str
+
+
 class TeamInput(TypedDict):
     request: str
     project: Annotated[str, AfterValidator(existing_dir)]
     max_rounds: NotRequired[Annotated[int, Field(ge=0, le=10)]]
     max_cost_usd: NotRequired[Annotated[float, Field(gt=0, le=20)]]
+    # The user's next message to a finished run (nexus.resume --message), sent
+    # as new input on its thread; a new run can't start with one.
+    follow_up: NotRequired[str]
 
 
 class TeamState(BaseState, total=False):
@@ -270,6 +292,8 @@ class TeamState(BaseState, total=False):
     max_rounds: int
     max_cost_usd: float
     reports: Annotated[list[Report], add]
+    turns: Annotated[list[Turn], add]  # earlier requests and their answers, oldest first
+    follow_up: str  # set by the input, moved into request by next_turn
     brief: str
     pending: list[ChangeDict]  # the engineer's staged batch, awaiting approval
     approval: dict  # {"decision": "approve" | "reject", "note": str}
@@ -320,7 +344,17 @@ class Limits:
 
 
 def orchestrator_message(state: TeamState, limits: Limits, commands_text: str) -> str:
-    parts = [
+    parts = []
+    turns = state.get("turns", [])
+    if turns:
+        parts.append("<earlier_turns>")
+        for i, turn in enumerate(turns, 1):
+            parts.append(
+                f'<turn n="{i}">\n<request>\n{turn["request"]}\n</request>\n'
+                f"<answer>\n{turn['answer']}\n</answer>\n</turn>"
+            )
+        parts.append("</earlier_turns>")
+    parts += [
         f"<request>\n{state['request']}\n</request>",
         f"<commands>\n{commands_text}\n</commands>",
         f"<rounds_left>{limits.rounds_left}</rounds_left>",
@@ -434,6 +468,14 @@ def build(
         else:
             update["brief"] = decision.brief
         return update
+
+    def next_turn(state: TeamState) -> dict:
+        """Start a follow-up: the finished request and its answer become a turn."""
+        if not state.get("answer"):
+            raise ValueError("a follow-up needs a finished request to follow")
+        turn: Turn = {"request": state["request"], "answer": state["answer"]}
+        log.info("follow-up to turn %d", len(state.get("turns", [])) + 1)
+        return {"turns": [turn], "request": state["follow_up"], "follow_up": "", "answer": ""}
 
     def read_only(role: str):
         spec = READ_ONLY_SPECIALISTS[role]
@@ -576,7 +618,13 @@ def build(
     graph.add_node("engineer", engineer)
     graph.add_node("approve", approve)
     graph.add_node("apply", apply)
-    graph.add_edge(START, "orchestrator")
+    graph.add_node("next_turn", next_turn)
+    graph.add_conditional_edges(
+        START,
+        lambda state: "next_turn" if state.get("follow_up") else "orchestrator",
+        ["next_turn", "orchestrator"],
+    )
+    graph.add_edge("next_turn", "orchestrator")
     graph.add_conditional_edges(
         "orchestrator",
         lambda state: state["verdict"],

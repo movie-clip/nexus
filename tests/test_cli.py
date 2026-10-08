@@ -82,6 +82,20 @@ def test_failed_run_says_how_to_retry_and_resume_retries(cli, monkeypatch, proje
     assert capsys.readouterr().out.strip() == "Done."
 
 
+def test_a_message_continues_a_completed_run(cli, monkeypatch, project, capsys):
+    orch = ScriptedOrchestrator(
+        decide("finish", answer="Plan: raise Speed."),
+        decide("finish", answer="Raised."),
+    )
+    use_team(monkeypatch, orch)
+    assert run(project) == 0
+    capsys.readouterr()
+
+    assert resume_cli.main(["--thread", "t", "--message", "Go with the plan."]) == 0
+    assert capsys.readouterr().out.strip() == "Raised."
+    assert "<request>\nGo with the plan.\n</request>" in orch.calls[-1][1][1][1]
+
+
 def test_json_prints_the_whole_result(cli, monkeypatch, project, capsys):
     use_team(monkeypatch, ScriptedOrchestrator(decide("finish", answer="Hi.")))
     assert run(project, "--json") == 0
@@ -117,6 +131,8 @@ def test_nexus_refuses_bad_arguments(cli, capsys, argv, message):
         (["--thread", "t", "--note", "x"], "--note goes with --decision"),
         (["--thread", "nope"], "no run with thread 'nope'"),
         (["--thread", "t", "--decision", "maybe"], "invalid choice"),
+        (["--thread", "t", "--decision", "approve", "--message", "x"], "not allowed with"),
+        (["--thread", "t", "--message", "x", "--note", "y"], "--note goes with --decision"),
     ],
 )
 def test_resume_refuses_bad_arguments(cli, capsys, argv, message):

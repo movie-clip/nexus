@@ -212,3 +212,11 @@ def test_a_waiting_run_needs_a_decision_to_continue(project):
     start(project, graph)
     with pytest.raises(InputError, match="is waiting for a decision"):
         resume_pipeline("t", None, open_runs_db(), graph=graph)
+
+
+def test_a_waiting_run_refuses_a_message(project):
+    orch = ScriptedOrchestrator(decide("engineer", brief="Set Speed to 12f."))
+    graph = make_graph(orch, [engineer_that_edits()])
+    start(project, graph)
+    with pytest.raises(InputError, match="is waiting for a decision; answer it first"):
+        resume_pipeline("t", None, open_runs_db(), graph=graph, message="Use 11f.")

@@ -125,3 +125,56 @@ def test_resume_finds_the_pipeline_recorded_with_the_run(isolated_runs_db, in_re
     again = resume_pipeline("smoke-1", None, open_runs_db())
     assert again.failed_node == "check"  # the injected bug fires again...
     assert again.state["visited"] == ["step_a", "step_b"]  # ...but nothing before it re-ran
+
+
+class ChatState(TypedDict, total=False):
+    heard: list[str]
+    follow_up: str
+
+
+class ChatIn(TypedDict, total=False):
+    follow_up: str
+
+
+def chat_graph():
+    """One node that records each follow-up it is sent."""
+
+    def listen(state):
+        return {"heard": [*state.get("heard", []), state.get("follow_up", "")]}
+
+    g = StateGraph(ChatState, input_schema=ChatIn)
+    g.add_node("listen", listen)
+    g.add_edge(START, "listen")
+    g.add_edge("listen", END)
+    return g.compile(name="chat")
+
+
+def test_a_message_continues_a_completed_run_on_its_thread(isolated_runs_db):
+    graph = chat_graph()
+    run_pipeline(graph, "c", {}, open_runs_db())
+    result = resume_pipeline("c", None, open_runs_db(), graph=graph, message="hello")
+    assert result.status == "completed"
+    assert result.state["heard"] == ["", "hello"]
+
+
+def test_a_completed_run_that_takes_messages_says_so(isolated_runs_db):
+    graph = chat_graph()
+    run_pipeline(graph, "c", {}, open_runs_db())
+    with pytest.raises(InputError, match="already completed; send a follow-up message"):
+        resume_pipeline("c", None, open_runs_db(), graph=graph)
+
+
+@pytest.mark.parametrize(
+    ("fails", "kwargs", "message"),
+    [
+        (False, {"message": "hi"}, "pipeline 'flaky' doesn't take follow-up messages"),
+        (True, {"message": "hi"}, "stopped at a failed step; retry it"),
+        (False, {"message": "  "}, "the message is empty"),
+        (False, {"message": "hi", "decision": {"decision": "approve"}}, "not both"),
+    ],
+)
+def test_bad_messages_are_refused(isolated_runs_db, fails, kwargs, message):
+    graph = flaky_graph({}, fail_first_b=fails)
+    run_pipeline(graph, "m", {"n": 1}, open_runs_db())
+    with pytest.raises(InputError, match=message):
+        resume_pipeline("m", checkpointer=open_runs_db(), graph=graph, **kwargs)

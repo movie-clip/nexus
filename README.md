@@ -61,6 +61,16 @@ request -> orchestrator -+- scout -----------------------------------+
   "write EditMode tests for the crate pipeline and run them").
 - Every run is saved in `runs/nexus.sqlite` (git-ignored), so a paused or
   failed run continues later from a new terminal with `nexus.resume`.
+- A finished run takes a **follow-up**: when the answer is a plan or asks you
+  to decide, reply on the same thread, and the team continues with the earlier
+  requests, answers and reports in view (no scouting the same code again):
+
+  ```sh
+  uv run python -m nexus.resume --thread <id> --message "go with steps 1-3, no tests"
+  ```
+
+  A run waiting for your approval needs `--decision` first, and a failed run
+  needs a plain resume first.
 - Spending is capped three ways:
   - at most `--max-rounds` specialist and tester rounds (default 6);
   - at most `--budget` US dollars per run (default 2), checked before each
@@ -93,7 +103,7 @@ The same graphs work in two ways:
 | | Command | Use it for |
 |---|---|---|
 | **Ask** | `uv run python -m nexus "<request>" --project <path>` | a request in plain text (team by default) |
-| **Resume** | `uv run python -m nexus.resume --thread <id> [--decision approve\|reject]` | answer a paused run, or retry a failed one |
+| **Resume** | `uv run python -m nexus.resume --thread <id> [--decision approve\|reject \| --message "..."]` | answer a paused run, retry a failed one, or follow up a finished one |
 | **Run** | `uv run python -m nexus.run --pipeline <name>` | any pipeline, inputs via `--set`, result as JSON |
 | **Inspect** | `uv run langgraph dev` | developing: local API and Studio UI to watch and step through runs (in-memory, dev only) |
 

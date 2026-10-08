@@ -9,7 +9,9 @@ int).
 
 Every run is saved, step by step, to ``runs/nexus.sqlite`` under its thread
 id: a run that pauses for a decision, or fails partway, is continued with
-``python -m nexus.resume --thread <id>``. A thread id can only be started once.
+``python -m nexus.resume --thread <id>``, and a completed run of a pipeline
+that takes follow-ups gets the next message the same way. A thread id can only
+be started once.
 
 Progress is logged to stderr, one line per finished node or retry; a failed
 run also logs its traceback there once. The result is printed to stdout as
@@ -54,6 +56,7 @@ NEXUS_ROOT = Path(__file__).resolve().parents[2]
 RUNS_DB = NEXUS_ROOT / "runs" / "nexus.sqlite"
 EXIT_OK, EXIT_RUN_ERRORS, EXIT_FAILED, EXIT_WAITING = 0, 1, 3, 4
 RETRY_LOGGER = "langgraph.pregel._retry"
+FOLLOW_UP = "follow_up"  # the input field a pipeline declares to take follow-up messages
 
 
 @dataclass
@@ -184,10 +187,20 @@ def resume_pipeline(
     checkpointer: BaseCheckpointSaver | None = None,
     graph: CompiledStateGraph | None = None,
     config_file: Path = CONFIG_FILE,
+    message: str | None = None,
 ) -> RunResult:
     """Continue a saved run: answer the question a paused run is waiting on
-    (``decision``), or re-run the step a failed run stopped at (no decision).
-    ``graph`` defaults to the pipeline recorded with the run."""
+    (``decision``), re-run the step a failed run stopped at (nothing given), or
+    send a completed run a follow-up ``message``. ``graph`` defaults to the
+    pipeline recorded with the run.
+
+    A follow-up is new input on the same thread, LangGraph's way to continue a
+    conversation: the graph starts again from START with the saved state and
+    ``{FOLLOW_UP: message}``. Only pipelines with that input field take one."""
+    if message is not None and decision is not None:
+        raise InputError("give a decision or a message, not both")
+    if message is not None and not message.strip():
+        raise InputError("the message is empty")
     checkpointer = checkpointer or open_runs_db()
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     saved = checkpointer.get_tuple(config)
@@ -201,14 +214,23 @@ def resume_pipeline(
     # find the graph.
     config["metadata"] = {"pipeline": graph.get_name()}
     snapshot = graph.get_state(config)
+    takes_messages = FOLLOW_UP in get_type_hints(graph.builder.input_schema)
     if snapshot.interrupts and decision is None:
-        raise InputError(f"thread {thread_id!r} is waiting for a decision")
+        hint = "; answer it first" if message is not None else ""
+        raise InputError(f"thread {thread_id!r} is waiting for a decision{hint}")
     if not snapshot.interrupts and decision is not None:
         raise InputError(f"thread {thread_id!r} is not waiting for a decision")
-    if not snapshot.next:
-        raise InputError(f"thread {thread_id!r} has already completed")
+    payload: Any = Command(resume=decision) if decision is not None else None
+    if message is not None:
+        if snapshot.next:
+            raise InputError(f"thread {thread_id!r} stopped at a failed step; retry it first")
+        if not takes_messages:
+            raise InputError(f"pipeline {graph.get_name()!r} doesn't take follow-up messages")
+        payload = {FOLLOW_UP: message}
+    elif not snapshot.next:
+        hint = "; send a follow-up message instead" if takes_messages else ""
+        raise InputError(f"thread {thread_id!r} has already completed{hint}")
     log.info("resume graph=%s thread=%s", graph.get_name(), thread_id)
-    payload: Command | None = Command(resume=decision) if decision is not None else None
     return _drive(graph, payload, config, resumed=True)
 
 
