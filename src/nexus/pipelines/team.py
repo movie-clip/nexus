@@ -164,6 +164,12 @@ The final answer: Markdown, the direct answer first, citing files as \
 what was built or tested and the result, and what the user should still check \
 themselves. Don't mention the team, rounds or specialists.
 
+Your answer ends this request. When the request asks for a plan or decisions \
+before any change, or the work needs a choice only the user can make, end with \
+the plan as numbered steps and the open decisions as numbered questions, each \
+with your recommendation. The user replies with a follow-up message, so don't \
+say you are waiting, and don't promise what you will do if they agree.
+
 Fields: `next`; `reason` (one sentence: why this step; the user sees it when \
 asked to approve a command); `brief` (the task when next is scout, reviewer or \
 engineer, otherwise ""); `command` and `args` (when next is tester, otherwise \

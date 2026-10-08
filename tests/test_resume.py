@@ -178,3 +178,9 @@ def test_bad_messages_are_refused(isolated_runs_db, fails, kwargs, message):
     run_pipeline(graph, "m", {"n": 1}, open_runs_db())
     with pytest.raises(InputError, match=message):
         resume_pipeline("m", checkpointer=open_runs_db(), graph=graph, **kwargs)
+
+
+def test_a_completed_result_says_whether_its_pipeline_takes_messages(isolated_runs_db):
+    assert run_pipeline(chat_graph(), "c", {}, open_runs_db()).follow_ups
+    flaky = flaky_graph({}, fail_first_b=False)
+    assert not run_pipeline(flaky, "f", {"n": 1}, open_runs_db()).follow_ups

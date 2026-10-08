@@ -70,6 +70,8 @@ class RunResult:
     # What this start or resume spent, every model call counted, including a
     # step that failed (its cost never reaches state["cost_usd"]).
     spent_usd: float = 0.0
+    # Completed, and the pipeline takes a follow-up message on this thread.
+    follow_ups: bool = False
 
     @property
     def exit_code(self) -> int:
@@ -181,6 +183,10 @@ def run_pipeline(
     return _drive(graph, inputs, config, resumed=False)
 
 
+def takes_follow_ups(graph: CompiledStateGraph) -> bool:
+    return FOLLOW_UP in get_type_hints(graph.builder.input_schema)
+
+
 def resume_pipeline(
     thread_id: str,
     decision: Any = None,
@@ -214,7 +220,7 @@ def resume_pipeline(
     # find the graph.
     config["metadata"] = {"pipeline": graph.get_name()}
     snapshot = graph.get_state(config)
-    takes_messages = FOLLOW_UP in get_type_hints(graph.builder.input_schema)
+    takes_messages = takes_follow_ups(graph)
     if snapshot.interrupts and decision is None:
         hint = "; answer it first" if message is not None else ""
         raise InputError(f"thread {thread_id!r} is waiting for a decision{hint}")
@@ -287,7 +293,7 @@ def _stream(graph: CompiledStateGraph, payload: Any, config: RunnableConfig) -> 
             thread_id, "waiting", snapshot.values, waiting_for=snapshot.interrupts[0].value
         )
     log.info("completed thread=%s", thread_id)
-    return RunResult(thread_id, "completed", snapshot.values)
+    return RunResult(thread_id, "completed", snapshot.values, follow_ups=takes_follow_ups(graph))
 
 
 # --- CLI --------------------------------------------------------------------

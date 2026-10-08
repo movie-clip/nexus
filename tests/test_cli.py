@@ -92,7 +92,9 @@ def test_a_message_continues_a_completed_run(cli, monkeypatch, project, capsys):
     capsys.readouterr()
 
     assert resume_cli.main(["--thread", "t", "--message", "Go with the plan."]) == 0
-    assert capsys.readouterr().out.strip() == "Raised."
+    out = capsys.readouterr()
+    assert out.out.strip() == "Raised."
+    assert 'Reply: python -m nexus.resume --thread t --message "..."' in out.err
     assert "<request>\nGo with the plan.\n</request>" in orch.calls[-1][1][1][1]
 
 
@@ -165,3 +167,10 @@ def test_a_follow_up_shows_what_this_request_cost(cli, capsys):
     state = {"cost_usd": 0.9, "turns": [turn], "answer": "Done."}
     assert nexus_cli.show(RunResult("t", "completed", state)) == 0
     assert "[completed] thread=t cost=$0.9000 (this request $0.1500)" in capsys.readouterr().err
+
+
+def test_a_pipeline_without_follow_ups_offers_no_reply(cli, capsys):
+    from nexus.run import RunResult
+
+    assert nexus_cli.show(RunResult("t", "completed", {"answer": "Hi."})) == 0
+    assert "Reply:" not in capsys.readouterr().err

@@ -12,6 +12,9 @@ prints them as one diff; nothing is written until you approve with
 same pause comes before the tester runs a build or test command, unless the
 project's config (``projects/<name>.toml``) sets that command to run without asking.
 
+A finished team run takes a follow-up on the same thread, e.g. to approve a
+plan it proposed: ``python -m nexus.resume --thread <id> --message "..."``.
+
 The answer is printed to stdout as Markdown; progress (including each routing
 decision), cost and the thread id go to stderr. ``--json`` prints the full run
 result instead. Exit codes are the same as ``nexus.run``.
@@ -105,6 +108,8 @@ def show(result: RunResult, as_json: bool = False) -> int:
         )
     elif result.status == "failed":
         print(f"Retry the failed step: {resume}", file=sys.stderr)
+    elif result.follow_ups:
+        print(f'Reply: {resume} --message "..."', file=sys.stderr)
     return result.exit_code
 
 
