@@ -185,3 +185,14 @@ def test_each_role_gets_its_skills(project):
     assert f"{SKILLS_MOUNT}code-review/SKILL.md" not in seen["engineer"]
     for role in ("reviewer", "engineer"):
         assert f"{SKILLS_MOUNT}codebase-design/SKILL.md" in seen[role]
+
+
+@pytest.mark.parametrize(
+    ("role", "named"),
+    [(team.READ_ONLY_SPECIALISTS["reviewer"], {"code-review"}), (team.ENGINEER, {"tdd"})],
+)
+def test_a_prompt_only_names_skills_its_role_carries(role, named):
+    # Prompts tell the agent to read these in full; a skill missing from the
+    # role would send it looking for a file that isn't there.
+    assert set(re.findall(r"the ([a-z-]+) skill", role.prompt)) == named
+    assert named <= set(role.skills)
