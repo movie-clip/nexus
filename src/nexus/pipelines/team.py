@@ -64,6 +64,7 @@ from nexus.agents import (
     existing_dir,
     read_only_agent,
     run_agent,
+    skill_shelf,
     staged_engineer,
 )
 from nexus.models import DEFAULT_MODEL, cost_usd, make_model
@@ -88,6 +89,9 @@ class Role:
     # Model calls one dispatch may take; the last one writes the report.
     # Simple fact-finding takes 3-10 (Anthropic's guide); the cap is for runaways.
     max_model_calls: int
+    # Skills from nexus/skills this role may read (the agent sees their names
+    # and descriptions, and reads one in full when a task matches).
+    skills: tuple[str, ...] = ()
 
 
 ORCHESTRATOR = Role(
@@ -198,6 +202,7 @@ You have read-only access and cannot change files.""",
         model=DEFAULT_MODEL,
         effort="high",
         max_model_calls=30,
+        skills=("code-review", "codebase-design"),
         prompt="""\
 You are the reviewer on an engineering team. You are given a draft answer, a \
 list of claims, or a description of a change already applied to the project in \
@@ -218,6 +223,7 @@ ENGINEER = Role(
     model=DEFAULT_MODEL,
     effort="high",
     max_model_calls=60,
+    skills=("tdd", "codebase-design"),
     prompt="""\
 You are the engineer on an engineering team. Make the change described in \
 your brief to the project in your filesystem (`/` is the project root).
@@ -510,18 +516,24 @@ def build(
 
         def node(state: TeamState) -> dict:
             limit = StepLimit(spec.max_model_calls)
-            agent = read_only_agent(state["project"], model_for(role), spec.prompt, role, limit)
-            text, cost = run_agent(agent, state["brief"], limit)
+            with skill_shelf(spec.skills) as skills:
+                agent = read_only_agent(
+                    state["project"], model_for(role), spec.prompt, role, limit, skills
+                )
+                text, cost = run_agent(agent, state["brief"], limit)
             report: Report = {"role": role, "brief": state["brief"], "report": text}
             return {"reports": [report], "cost_usd": cost}
 
         return node
 
     def engineer(state: TeamState) -> dict:
-        with tempfile.TemporaryDirectory(prefix="nexus-staging-") as staging:
+        with (
+            tempfile.TemporaryDirectory(prefix="nexus-staging-") as staging,
+            skill_shelf(ENGINEER.skills) as skills,
+        ):
             limit = StepLimit(ENGINEER.max_model_calls)
             agent, backend = staged_engineer(
-                state["project"], staging, model_for("engineer"), ENGINEER.prompt, limit
+                state["project"], staging, model_for("engineer"), ENGINEER.prompt, limit, skills
             )
             text, cost = run_agent(agent, state["brief"], limit)
             batch = [asdict(change) for change in backend.changes()]

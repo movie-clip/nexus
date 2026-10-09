@@ -1,7 +1,10 @@
 """Building blocks shared by nexus's Deep Agents."""
 
 import logging
-from collections.abc import Callable
+import shutil
+import tempfile
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -41,12 +44,44 @@ MEMORY_FILES = ["/AGENTS.md", "/CLAUDE.md"]
 SCRATCH = "/.nexus-scratch/"
 
 
-def with_scratch(project_backend: BackendProtocol) -> CompositeBackend:
+# Agent Skills nexus ships (see skills/README.md). An agent is given a shelf:
+# a temporary folder with copies of only its own skills, shown at SKILLS_MOUNT
+# and read-only. Deep Agents lists every skill in the folder it is given, so a
+# shelf per agent is what keeps one role's skills from another.
+SKILLS_DIR = Path(__file__).parent / "skills"
+SKILLS_MOUNT = "/.nexus-skills/"
+
+
+@contextmanager
+def skill_shelf(names: Sequence[str]) -> Iterator[str | None]:
+    """A temporary folder holding copies of the named skills, removed on exit;
+    ``None`` when there are none."""
+    if not names:
+        yield None
+        return
+    for name in names:
+        if not (SKILLS_DIR / name / "SKILL.md").is_file():
+            raise ValueError(f"no skill {name!r} in {SKILLS_DIR}")
+    with tempfile.TemporaryDirectory(prefix="nexus-skills-") as shelf:
+        for name in names:
+            shutil.copytree(SKILLS_DIR / name, Path(shelf) / name)
+        yield shelf
+
+
+def with_scratch(project_backend: BackendProtocol, skills: str | None = None) -> CompositeBackend:
+    routes: dict[str, BackendProtocol] = {SCRATCH: StateBackend()}
+    if skills:
+        routes[SKILLS_MOUNT] = FilesystemBackend(root_dir=skills, virtual_mode=True)
     return CompositeBackend(
         default=project_backend,
-        routes={SCRATCH: StateBackend()},
+        routes=routes,
         artifacts_root=SCRATCH.rstrip("/"),
     )
+
+
+def skill_options(skills: str | None) -> dict[str, Any]:
+    """``create_deep_agent`` arguments for an agent given a skill shelf."""
+    return {"skills": [SKILLS_MOUNT]} if skills else {}
 
 
 # Enforced at the tool layer, so they hold even if a model calls a hidden tool.
@@ -142,7 +177,12 @@ def existing_dir(path: str) -> str:
 
 
 def read_only_agent(
-    project: str, model: BaseChatModel, system_prompt: str, name: str, limit: StepLimit
+    project: str,
+    model: BaseChatModel,
+    system_prompt: str,
+    name: str,
+    limit: StepLimit,
+    skills: str | None = None,
 ):
     """A Deep Agent that can explore ``project`` but not change it, in at most
     ``limit.max_calls`` model calls.
@@ -153,27 +193,35 @@ def read_only_agent(
     * it can't start sub-subagents (Deep Agents' ``task`` helper is taken away);
     * there is no shell tool (Deep Agents only adds one for sandbox backends);
     * ``.env`` files are unreadable;
-    * Deep Agents' own files stay in memory (``SCRATCH``).
+    * Deep Agents' own files stay in memory (``SCRATCH``);
+    * ``skills``, a shelf from ``skill_shelf``, is shown at ``SKILLS_MOUNT``.
     """
     return create_deep_agent(
         model=model,
         system_prompt=system_prompt,
-        backend=with_scratch(FilesystemBackend(root_dir=project, virtual_mode=True)),
+        backend=with_scratch(FilesystemBackend(root_dir=project, virtual_mode=True), skills),
         permissions=READ_ONLY_PERMISSIONS + NO_SECRETS_PERMISSIONS,
         middleware=[HideTools(WRITE_TOOLS | {SUBAGENT_TOOL}), *limit.middleware()],
         memory=MEMORY_FILES,
         name=name,
+        **skill_options(skills),
     )
 
 
 ENGINEER_PERMISSIONS = [
     FilesystemPermission(operations=["write"], paths=["/.git/**"], mode="deny"),
     FilesystemPermission(operations=["write"], paths=["/**/.env", "/**/.env.*"], mode="deny"),
+    FilesystemPermission(operations=["write"], paths=[f"{SKILLS_MOUNT}**"], mode="deny"),
 ]
 
 
 def staged_engineer(
-    project: str, staging_dir: str, model: BaseChatModel, system_prompt: str, limit: StepLimit
+    project: str,
+    staging_dir: str,
+    model: BaseChatModel,
+    system_prompt: str,
+    limit: StepLimit,
+    skills: str | None = None,
 ):
     """A Deep Agent that can change ``project``, but only through staging, in
     at most ``limit.max_calls`` model calls.
@@ -182,17 +230,20 @@ def staged_engineer(
     project; the caller collects them as one batch with ``backend.changes()``.
     It cannot write inside ``.git`` or to ``.env`` files, cannot read ``.env``
     files, has no shell, and can't start sub-subagents. Deep Agents' own files stay in memory
-    (``SCRATCH``), so they never join the batch. Returns ``(agent, backend)``.
+    (``SCRATCH``), so they never join the batch. ``skills``, a shelf from
+    ``skill_shelf``, is shown at ``SKILLS_MOUNT``, read-only and outside the
+    batch. Returns ``(agent, backend)``.
     """
     backend = StagedBackend(project, staging_dir)
     agent = create_deep_agent(
         model=model,
         system_prompt=system_prompt,
-        backend=with_scratch(backend),
+        backend=with_scratch(backend, skills),
         permissions=ENGINEER_PERMISSIONS + NO_SECRETS_PERMISSIONS,
         middleware=[HideTools(frozenset({SUBAGENT_TOOL})), *limit.middleware()],
         memory=MEMORY_FILES,
         name="engineer",
+        **skill_options(skills),
     )
     return agent, backend
 
