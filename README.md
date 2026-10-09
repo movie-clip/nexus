@@ -86,6 +86,14 @@ request -> orchestrator -+- scout -----------------------------------+
 - Every model call is logged with its cost as it ends, e.g.
   `model call 7 (scout): $0.0312, run so far $0.4123`. A failed run also shows
   what the failed step spent, which isn't part of the run's recorded cost.
+- **Skills**: the reviewer and engineer carry [Agent Skills](https://agentskills.io)
+  from `src/nexus/skills/`, adapted from [mattpocock/skills](https://github.com/mattpocock/skills).
+  Reviewer: `code-review` (a Standards pass and a Spec pass, reported apart)
+  and `codebase-design`. Engineer: `tdd` (when tests are asked for) and
+  `codebase-design`. Each agent sees only its own skills' names and
+  descriptions and reads one in full when a task matches; they are read-only
+  and never part of a batch. What was changed from the originals, and why, is
+  in `src/nexus/skills/README.md`.
 - `--pipeline ask` uses a single agent instead (`pipelines/ask.py`).
 
 The scout, the reviewer and `--pipeline ask` are **read-only**: they can list,
@@ -216,7 +224,8 @@ src/nexus/
   state.py        BaseState: errors, cost_usd, artifacts, retries, verdict
   retry.py        DEFAULT_RETRY (transient errors) and retry_update (capped "try again" routes)
   models.py       Claude model defaults (effort, refusal fallbacks) and cost_usd from token usage
-  agents.py       shared Deep Agent pieces: read_only_agent, staged_engineer, permissions, run_agent
+  agents.py       shared Deep Agent pieces: read_only_agent, staged_engineer, permissions, skill shelves, run_agent
+  skills/         Agent Skills the specialists may read (copied from mattpocock/skills, adapted)
   staging.py      StagedBackend (the engineer's writes go here) and apply_changes
   commands.py     the tester's commands: per-project config, checks, running, reports
   resume.py       `python -m nexus.resume`

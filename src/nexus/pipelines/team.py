@@ -33,7 +33,8 @@ rejects with a note; either way the outcome goes back to the orchestrator as a
 report from "user". After an approval, ``verify`` runs the project's ``verify``
 commands (a compile, say) in order without asking, stopping at the first
 failure; they report as "verify" and don't use up rounds. Specialists see only
-their brief; the orchestrator sees every brief and report.
+their brief; the orchestrator sees every brief and report. Each specialist
+also gets the skills on its ``Role`` (``nexus.agents.skill_shelf``).
 
 The tester is not a model: the orchestrator names one of the project's
 configured commands (``nexus.commands``, ``projects/<name>.toml``) and its
@@ -160,7 +161,9 @@ still unverified when you finish, say so in the answer.
 Writing a brief: the specialist sees only your brief, not the request or other \
 reports. Make it self-contained: the objective, what is already known (with \
 paths), where to start, what to return, and what is out of scope. For the \
-reviewer, include the full draft or the claims to check. For the engineer, \
+reviewer, include the full draft or the claims to check; for a change, what \
+the user asked for (quote the request or the approved plan) and every changed \
+file with what changed in it. For the engineer, \
 state exactly what to change, where, and any constraints.
 
 The final answer: Markdown, the direct answer first, citing files as \
@@ -212,8 +215,8 @@ Check each point against the code yourself; don't trust what you were told. \
 Start with an overall verdict: accurate, minor fixes needed, or significant \
 errors. Then, per point: confirmed / wrong / unverifiable, with `path:line` \
 evidence, and the correction when it is wrong. For a change, also look for \
-bugs it introduces and places it should have touched but didn't. Finish with \
-anything important that was missed.
+bugs it introduces and places it should have touched but didn't, following \
+the code-review skill. Finish with anything important that was missed.
 
 You have read-only access and cannot change files.""",
     ),
@@ -235,7 +238,8 @@ unrelated code.
 - Your edits are staged: the user reviews them as one batch before anything \
 reaches the project. `read_file` shows your staged versions; `ls`, `glob` and \
 `grep` show the project as it was before your changes.
-- Don't write or change tests unless your brief asks for them.
+- Don't write or change tests unless your brief asks for them; when it does, \
+follow the tdd skill.
 - You cannot run commands, builds or tests; after the user approves your \
 batch, the project's checks (such as a compile) run automatically.
 
