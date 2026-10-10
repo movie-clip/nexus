@@ -52,12 +52,15 @@ PRICES: dict[str, Price] = {
 UNKNOWN_PRICE = max(PRICES.values(), key=lambda p: p.output)
 
 
-def make_model(model: str = DEFAULT_MODEL, effort: str = "high") -> ChatAnthropic:
+def make_model(model: str = DEFAULT_MODEL, effort: str = "medium") -> ChatAnthropic:
     """A ChatAnthropic client with nexus defaults.
 
     * ``effort`` is set explicitly. Sonnet 5.5 and Opus 5.5 can't turn
       thinking off, so effort is the depth control, and their defaults differ
-      (Sonnet ``high``, Opus ``medium``).
+      (Sonnet ``high``, Opus ``medium``). nexus runs every agent at
+      ``medium`` (the user's choice, 2026-10-10): thinking was 38% of
+      specialist cost at ``high``, and lower effort also means fewer,
+      more consolidated tool calls.
     * Server-side refusal fallbacks are on: if a safety classifier declines a
       request, the API re-runs it on a fallback model instead of stopping.
     * The SDK already retries 429, 5xx and connection errors per API call.

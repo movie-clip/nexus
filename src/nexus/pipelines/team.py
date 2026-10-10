@@ -97,7 +97,7 @@ class Role:
 
 ORCHESTRATOR = Role(
     model=DEFAULT_MODEL,
-    effort="high",
+    effort="medium",
     max_model_calls=1,  # one structured call per round
     prompt="""\
 You lead a small team handling an engineering request about a software \
@@ -205,7 +205,7 @@ You have read-only access and cannot change files.""",
     ),
     "reviewer": Role(
         model=DEFAULT_MODEL,
-        effort="high",
+        effort="medium",
         max_model_calls=30,
         skills=("code-review", "codebase-design"),
         prompt="""\
@@ -232,7 +232,7 @@ You have read-only access and cannot change files.""",
 
 ENGINEER = Role(
     model=DEFAULT_MODEL,
-    effort="high",
+    effort="medium",
     max_model_calls=60,
     skills=("tdd", "codebase-design"),
     prompt="""\

@@ -1,5 +1,6 @@
 """The ask pipeline, with a scripted model: no API calls, no cost."""
 
+import inspect
 import logging
 
 import pytest
@@ -110,6 +111,12 @@ def test_project_agents_md_is_loaded_as_memory(project):
 
 
 # --- the pipeline -------------------------------------------------------------
+
+
+def test_default_model_runs_at_medium_effort():
+    # The user's choice (2026-10-10): every agent at medium effort.
+    factory = inspect.signature(ask.build).parameters["model_factory"].default
+    assert factory().effort == "medium"
 
 
 def test_pipeline_returns_answer_and_cost(project):
