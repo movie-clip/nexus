@@ -183,7 +183,6 @@ def test_role_models():
         model = team.default_model(role)
         assert isinstance(model, ChatAnthropic)
         assert model.model == team.role_spec(role).model
-        # The user's choice (2026-10-10): every role at medium effort.
         assert model.effort == team.role_spec(role).effort == "medium"
 
 

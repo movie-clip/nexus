@@ -114,7 +114,6 @@ def test_project_agents_md_is_loaded_as_memory(project):
 
 
 def test_default_model_runs_at_medium_effort():
-    # The user's choice (2026-10-10): every agent at medium effort.
     factory = inspect.signature(ask.build).parameters["model_factory"].default
     assert factory().effort == "medium"
 
