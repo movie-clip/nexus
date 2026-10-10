@@ -186,6 +186,15 @@ def test_role_models():
         assert model.effort == team.role_spec(role).effort == "medium"
 
 
+def test_engineer_is_told_its_tool_calls_in_one_response_run_at_once():
+    # ToolNode runs a response's tool calls concurrently; Deep Agents rejects
+    # a second change to the same file in one response.
+    prompt = " ".join(team.ENGINEER.prompt.split())
+    assert "Only batch tool calls that are independent of each other." in prompt
+    assert "change each file at most once per response" in prompt
+    assert "read a file to check an edit only in a later response" in prompt
+
+
 def test_cost_sums_specialists_at_their_own_model_rates(project):
     orch = ScriptedOrchestrator(decide("scout", brief="b"), decide("finish", answer="a"))
     scout = scripted(final("r", 1_000_000, 100_000, model="claude-sonnet-5-5"))

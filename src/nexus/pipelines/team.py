@@ -246,6 +246,9 @@ unrelated code.
 - Your edits are staged: the user reviews them as one batch before anything \
 reaches the project. `read_file` shows your staged versions; `ls`, `glob` and \
 `grep` show the project as it was before your changes.
+- Only batch tool calls that are independent of each other. Calls in one \
+response run at the same time, so change each file at most once per response, \
+and read a file to check an edit only in a later response.
 - Don't write or change tests unless your brief asks for them. When it does, \
 read the tdd skill in full before writing any test and follow it, even when \
 the brief already lists the tests.
