@@ -1,7 +1,8 @@
 """Optional tracing of runs to a local Langfuse (see README, "Tracing").
 
-Tracing is on when LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set (nexus
-reads them from its .env); LANGFUSE_BASE_URL says where Langfuse runs. Each
+Tracing is on when LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY and
+LANGFUSE_BASE_URL are all set (nexus reads them from its .env). Without the
+URL the SDK would send traces to Langfuse's cloud, so tracing stays off. Each
 start or resume of a run becomes one trace: every node, model call and tool
 call inside it, the specialists' included. A run and its resumes share a
 Langfuse session named after the thread id.
@@ -20,7 +21,7 @@ from typing import Any
 from dotenv import dotenv_values
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
-KEYS = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+KEYS = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL")
 SECRET_NAME = re.compile(r"KEY|SECRET|TOKEN|PASSWORD", re.IGNORECASE)
 MASK = "[secret]"
 

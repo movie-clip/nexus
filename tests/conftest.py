@@ -21,6 +21,7 @@ def isolated_runs_db(tmp_path, monkeypatch):
     # doesn't override a variable that is already set.
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "")
     return path
 
 

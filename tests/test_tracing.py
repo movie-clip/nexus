@@ -24,6 +24,7 @@ def langfuse_keys(monkeypatch):
     public_key = f"pk-lf-test-{uuid.uuid4().hex}"
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", public_key)
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "http://127.0.0.1:9")  # local; spans stay in memory
     monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
     yield public_key
     get_client(public_key=public_key).shutdown()
@@ -53,6 +54,13 @@ def scout_run(project, tmp_path, request):  # noqa: F811 (fixture)
 def test_tracing_is_off_without_keys(project, tmp_path):  # noqa: F811
     assert tracing.run_config("t", "team", resumed=False) == {}
     assert scout_run(project, tmp_path, "How fast?").status == "completed"
+
+
+def test_tracing_is_off_without_a_base_url(langfuse_keys, monkeypatch):
+    # Without it the SDK would send traces to Langfuse's cloud, off this machine.
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "")
+    assert not tracing.enabled()
+    assert tracing.run_config("t", "team", resumed=False) == {}
 
 
 def test_run_is_traced_down_to_the_specialists_tool_calls(project, tmp_path, spans):  # noqa: F811
