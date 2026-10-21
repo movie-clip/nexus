@@ -31,5 +31,5 @@ def smoke_graph():
 
 @pytest.fixture
 def in_repo_root(monkeypatch):
-    """The CLI reads ./langgraph.json, like the langgraph CLI does."""
+    """Run from the repo root, as a person does."""
     monkeypatch.chdir(ROOT)

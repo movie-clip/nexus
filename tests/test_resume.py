@@ -127,6 +127,15 @@ def test_resume_finds_the_pipeline_recorded_with_the_run(isolated_runs_db, in_re
     assert again.state["visited"] == ["step_a", "step_b"]  # ...but nothing before it re-ran
 
 
+def test_resume_finds_the_pipeline_from_any_folder(isolated_runs_db, tmp_path, monkeypatch):
+    from nexus.pipelines import smoke
+
+    run_pipeline(smoke.graph, "smoke-2", {"fail_node": "check", "fail_kind": "bug"}, open_runs_db())
+    monkeypatch.chdir(tmp_path)  # no langgraph.json here
+    again = resume_pipeline("smoke-2", None, open_runs_db())
+    assert again.failed_node == "check"
+
+
 class ChatState(TypedDict, total=False):
     heard: list[str]
     follow_up: str

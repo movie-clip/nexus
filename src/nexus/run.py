@@ -51,8 +51,9 @@ from nexus.state import BaseState
 log = logging.getLogger("nexus.run")
 
 RESERVED = frozenset(get_type_hints(BaseState))
-CONFIG_FILE = Path("langgraph.json")
 NEXUS_ROOT = Path(__file__).resolve().parents[2]
+# nexus's own, wherever it is run from: the runs it saved name pipelines listed here.
+CONFIG_FILE = NEXUS_ROOT / "langgraph.json"
 RUNS_DB = NEXUS_ROOT / "runs" / "nexus.sqlite"
 EXIT_OK, EXIT_RUN_ERRORS, EXIT_FAILED, EXIT_WAITING = 0, 1, 3, 4
 RETRY_LOGGER = "langgraph.pregel._retry"
