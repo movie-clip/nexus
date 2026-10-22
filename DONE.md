@@ -1,6 +1,6 @@
 # Definition of done
 
-Agreed before building (see `research/langgraph-standalone-app.md` §6).
+Agreed before building (see `research/archive/langgraph-standalone-app.md` §6).
 Nexus is an engine first, so the criteria are what the engine promises. Each
 promise is proven by a test, not by a demo.
 

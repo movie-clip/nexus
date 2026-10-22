@@ -1,9 +1,10 @@
 # nexus
 
 An engineering assistant built on LangGraph and Deep Agents. You send it a
-request in plain text about a project; agents explore the project and answer.
-You start every run by hand. Background: `research/langgraph-standalone-app.md`.
-What "done" means: `DONE.md`.
+request in plain text about a project; agents explore it, change it only
+with your approval, run its configured builds and tests, and answer. You start
+every run by hand. What "done" means: `DONE.md`. The research nexus started
+from is archived in `research/archive/`; nexus has since gone its own way.
 
 ## Ask
 

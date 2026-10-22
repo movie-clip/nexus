@@ -1,5 +1,24 @@
 # LangGraph: research notes and a plan for a standalone app
 
+> **Archived (2026-10-22).** These notes, from 2026-10-07, are where nexus
+> started; nexus went a different way. What changed:
+>
+> - **The job.** Planned: scheduled pipelines over investment data, with
+>   little code editing (§4 even says editing code doesn't fit). Built: an
+>   engineering assistant whose engineer edits code through staged,
+>   approved batches.
+> - **Running.** Planned: a scheduler. Built: every run is started by hand.
+> - **Tracing.** Planned: LangSmith. Built: a self-hosted Langfuse.
+> - **`.agentic`.** The verdict table (§1) and §3 compare against it; nexus
+>   ignores it and depends on nothing from it.
+> - **§7 open questions** were settled in practice: LangGraph 1.x with
+>   `interrupt`/`Command` and `langgraph-checkpoint-sqlite`, Langfuse, local
+>   runs, no LangGraph Platform.
+>
+> Still useful: the tool notes in §2 (including "the interrupted node re-runs
+> from its start") and the state, secrets and testing advice in §5. Prices
+> are from that date; nexus's current ones are in `src/nexus/models.py`.
+
 Researched 2026-10-07. Prices, billing policy and benchmarks change often,
 so re-check anything marked *(verify)* before you rely on it.
 
