@@ -186,8 +186,8 @@ engineer, otherwise ""); `command` and `args` (when next is tester, otherwise \
 )
 
 READ_ONLY_SPECIALISTS: dict[str, Role] = {
-    # Every role is on DEFAULT_MODEL (Sonnet 5.5) during development. When
-    # tuning, the scout can stay on Sonnet: most of its work is reading.
+    # When tuning per-role models, the scout can stay on Sonnet: most of its
+    # work is reading.
     "scout": Role(
         model=DEFAULT_MODEL,
         effort="medium",

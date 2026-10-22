@@ -1,8 +1,5 @@
 # Commands nexus's tester may run on C:\projects\impact. Nothing else can run.
-# The format is described in src/nexus/commands.py. In short: `run` is an
-# argument list (never a shell line); `{param}` values must fully match their
-# pattern; a nested list is left out unless all its params have values;
-# approval = "ask" pauses the run for your OK, "auto" runs without asking.
+# The format: src/nexus/commands.py.
 
 path = "C:/projects/impact"
 

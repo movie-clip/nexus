@@ -126,7 +126,9 @@ project): `projects/<name>.toml`, matched by its `path`. `projects/impact.toml`
 is the example: `compile` (`dotnet build`) and `unity-tests` (Unity in
 batchmode, only when a request asks for tests), both run without asking.
 
-The shape, with made-up commands (the real ones are in `projects/impact.toml`):
+The shape, with made-up commands (the real ones are in `projects/impact.toml`;
+the full format, including `steps` for several commands in a row, is in
+`src/nexus/commands.py`):
 
 ```toml
 path = "C:/projects/myapp"

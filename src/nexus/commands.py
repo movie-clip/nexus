@@ -21,8 +21,16 @@ nested list is an optional group, left out unless every placeholder in it has
 a value. ``{results_file}`` is a path nexus provides outside the project for a
 test-results file (NUnit XML is summarized). A command given it must write it:
 exit code 0 with no results, or with 0 tests run, is reported as a failure.
-``steps = [[...], [...]]`` runs several commands in order, stopping at the
-first that fails.
+Several commands in order, stopping at the first that fails, take ``steps``
+instead of ``run``:
+
+    [commands.check]
+    description = "Restore, then build."
+    steps = [["dotnet", "restore"], ["dotnet", "build", "--no-restore"]]
+
+A project's ``verify = ["compile", ...]`` lists commands that run, in order and
+without asking, after every approved engineer batch; each must run without
+values from a model (every required param has a default).
 
 Commands run with nexus's own secrets (the names in nexus's ``.env`` and any
 ``ANTHROPIC_*`` variable) removed from their environment, with no input, and

@@ -38,9 +38,9 @@ by a demo; a live run backs it where a test can't reach the real API.
 | A Langfuse that is down or unreachable never fails or stalls a run | unreachable-endpoint test | E |
 | Deep Agents' own files (oversized messages and tool results, saved history) never reach the project or the engineer's batch: they are kept in memory, where the agent can still read them | offload tests with a 210k-character brief (failed before the fix) | pre-F |
 | A malformed approval answer asks the question again; it never fails the run or gets replayed | malformed-answer tests for batches and commands | pre-F |
-| Each specialist has a model-call limit (scout and reviewer 30, engineer 60, ask 30): the last call may not use tools and is told to write its report, a model that ignores that is stopped anyway, and the report says it was cut short | step-limit tests; live `tool_choice: none` call after tool use, 2026-10-07 | pre-F |
+| Each specialist has a model-call limit (set per role in code): the last call may not use tools and is told to write its report, a model that ignores that is stopped anyway, and the report says it was cut short | step-limit tests; live `tool_choice: none` call after tool use, 2026-10-07 | pre-F |
 | Specialists can't start Deep Agents' sub-subagents (`task`), whose calls no limit would count: the tool is not offered and is refused if called | hidden-tool tests | pre-F |
-| A run has a budget (`--budget`, default $2): the orchestrator sees spent and left, and once it is spent only "finish" is offered | budget tests; CLI flag test | pre-F |
+| Each request has a budget (`--budget`): the orchestrator sees spent and left, and once it is spent only "finish" is offered | budget tests; CLI flag test | pre-F |
 | Every model call is priced and logged as it ends (`model call 7 (scout): $0.03, run so far $0.41`); a failed run shows what the attempt spent, the failed step included, and an interrupted one logs it | cost meter tests | pre-F |
 | An incomplete orchestrator decision (a step without its brief, command or answer) goes back to the model with the problem named, up to twice, before the round fails | decision-fix tests | pre-F |
 | A test command that exits 0 but wrote no results file, an unreadable one, or one with 0 tests run is reported FAILED, not succeeded | results-file tests (`test_exit_0_without_test_results_is_a_failure`) | F |
