@@ -87,9 +87,10 @@ class Role:
     model: str
     effort: str
     prompt: str
-    # Model calls one dispatch may take; the last one writes the report.
-    # Simple fact-finding takes 3-10 (Anthropic's guide); the cap is for runaways.
-    max_model_calls: int
+    # Model calls one dispatch of a specialist may take; the last one writes the
+    # report. Simple fact-finding takes 3-10 (Anthropic's guide); the cap is for
+    # runaways. None for the orchestrator (see MAX_DECISION_FIXES).
+    max_model_calls: int | None = None
     # Skills from nexus/skills this role may read (the agent sees their names
     # and descriptions, and reads one in full when a task matches).
     skills: tuple[str, ...] = ()
@@ -98,7 +99,6 @@ class Role:
 ORCHESTRATOR = Role(
     model=DEFAULT_MODEL,
     effort="medium",
-    max_model_calls=1,  # one structured call per round
     prompt="""\
 You lead a small team handling an engineering request about a software \
 project. You cannot read or change the project yourself; your specialists can. \
@@ -345,6 +345,13 @@ def role_spec(role: str) -> Role:
     return READ_ONLY_SPECIALISTS[role]
 
 
+def step_limit(spec: Role) -> StepLimit:
+    """A fresh step limit for one dispatch of a specialist."""
+    if spec.max_model_calls is None:
+        raise ValueError("this role has no step limit")
+    return StepLimit(spec.max_model_calls)
+
+
 def default_model(role: str) -> BaseChatModel:
     spec = role_spec(role)
     return make_model(spec.model, effort=spec.effort)
@@ -531,7 +538,7 @@ def build(
         spec = READ_ONLY_SPECIALISTS[role]
 
         def node(state: TeamState) -> dict:
-            limit = StepLimit(spec.max_model_calls)
+            limit = step_limit(spec)
             with skill_shelf(spec.skills) as skills:
                 agent = read_only_agent(
                     state["project"], model_for(role), spec.prompt, role, limit, skills
@@ -547,7 +554,7 @@ def build(
             tempfile.TemporaryDirectory(prefix="nexus-staging-") as staging,
             skill_shelf(ENGINEER.skills) as skills,
         ):
-            limit = StepLimit(ENGINEER.max_model_calls)
+            limit = step_limit(ENGINEER)
             agent, backend = staged_engineer(
                 state["project"], staging, model_for("engineer"), ENGINEER.prompt, limit, skills
             )
@@ -717,7 +724,9 @@ def build(
     return graph
 
 
-MAX_DECISION_FIXES = 2  # times an incomplete decision is sent back before the round fails
+# Times an incomplete decision is sent back before the round fails, so a round
+# makes at most 1 + MAX_DECISION_FIXES orchestrator calls.
+MAX_DECISION_FIXES = 2
 
 
 def decision_problem(decision: Decision | FinalDecision) -> str | None:
