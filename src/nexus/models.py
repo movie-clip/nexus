@@ -31,20 +31,30 @@ class Price:
     input: float
     output: float
     cache_read: float
-    cache_write: float  # 5-minute cache writes cost 1.25x input
+    cache_write: float  # 5-minute cache writes
 
 
-# Anthropic first-party API rates (claude-api reference, cached 2026-09-25).
-# Cache reads are 0.1x input unless the reference lists a different rate.
+# Anthropic first-party API rates (claude-api reference, cached 2026-10-06).
+# Cache writes (5-minute) cost 1.25x input. Cache reads are 0.1x input, except
+# where Anthropic set them lower: Fable 5.1 / Mythos 5.1 0.025x, Opus 5.5 0.05x.
+# Every current model is listed: a refusal fallback may answer on any of them.
 # Order matters: longer IDs first, so "claude-opus-5" doesn't match "claude-opus-5-5".
 PRICES: dict[str, Price] = {
     "claude-fable-5-1": Price(input=10.00, output=50.00, cache_read=0.25, cache_write=12.50),
+    "claude-mythos-5-1": Price(input=10.00, output=50.00, cache_read=0.25, cache_write=12.50),
     "claude-fable-5": Price(input=10.00, output=50.00, cache_read=1.00, cache_write=12.50),
+    "claude-mythos-5": Price(input=10.00, output=50.00, cache_read=1.00, cache_write=12.50),
     "claude-opus-5-5": Price(input=4.00, output=20.00, cache_read=0.20, cache_write=5.00),
     "claude-opus-5": Price(input=5.00, output=25.00, cache_read=0.50, cache_write=6.25),
     "claude-opus-4-8": Price(input=5.00, output=25.00, cache_read=0.50, cache_write=6.25),
+    "claude-opus-4-7": Price(input=5.00, output=25.00, cache_read=0.50, cache_write=6.25),
+    "claude-opus-4-6": Price(input=5.00, output=25.00, cache_read=0.50, cache_write=6.25),
     "claude-sonnet-5-5": Price(input=2.00, output=10.00, cache_read=0.20, cache_write=2.50),
     "claude-sonnet-5": Price(input=2.00, output=10.00, cache_read=0.20, cache_write=2.50),
+    "claude-sonnet-4-6": Price(input=3.00, output=15.00, cache_read=0.30, cache_write=3.75),
+    # $0.10/$0.50 up to 100K prompt tokens, $0.50/$2.50 above. Usage reaches
+    # cost_usd summed over calls, so the higher rate: may overstate, never understate.
+    "claude-haiku-5-5": Price(input=0.50, output=2.50, cache_read=0.05, cache_write=0.625),
     "claude-haiku-4-5": Price(input=1.00, output=5.00, cache_read=0.10, cache_write=1.25),
 }
 # An unknown model (e.g. one a refusal fallback chose) is priced at the most
