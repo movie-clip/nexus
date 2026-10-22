@@ -1,8 +1,8 @@
 # Definition of done
 
 Agreed before building (see `research/archive/langgraph-standalone-app.md` §6).
-Nexus is an engine first, so the criteria are what the engine promises. Each
-promise is proven by a test, not by a demo.
+The criteria are what nexus promises. Each promise is proven by a test, not
+by a demo; a live run backs it where a test can't reach the real API.
 
 ## Engine promises
 
@@ -33,8 +33,7 @@ promise is proven by a test, not by a demo.
 | An "ask" command pauses with the exact command line and runs only on approve; "auto" runs at once; a rejection runs nothing and doesn't use a round | approval flow tests over a fresh SQLite connection | D |
 | A command can't outlive its time limit (the whole process tree is killed), never sees nexus's secrets, and reports the files it changed | timeout test with a grandchild process; env test; git check test | D |
 | The tester's report has the result, unique compiler errors, failed tests from NUnit XML, changed files and the output tail; the full log is kept | summary tests; live compile of impact | D |
-| Every run reports its LLM cost in `cost_usd` | LLM-node test with a fake model | A |
-| Without Langfuse keys nothing is traced; with them, a run and every step inside it (orchestrator, specialists, model and tool calls) is one trace, and a run and its resumes share a session | tracing tests with an in-memory exporter; first live trace, 2026-10-07 | E |
+| Unless both Langfuse keys and `LANGFUSE_BASE_URL` are set nothing is traced (so traces never fall back to Langfuse's cloud); with them, a run and every step inside it (orchestrator, specialists, model and tool calls) is one trace, and a run and its resumes share a session | tracing tests with an in-memory exporter; first live trace, 2026-10-07 | E |
 | nexus's secrets (its `.env` keys and tokens, any `ANTHROPIC_*`) are masked before a span leaves the process | masking test with a secret in a tool result; live trace searched for every secret | E |
 | A Langfuse that is down or unreachable never fails or stalls a run | unreachable-endpoint test | E |
 | Deep Agents' own files (oversized messages and tool results, saved history) never reach the project or the engineer's batch: they are kept in memory, where the agent can still read them | offload tests with a 210k-character brief (failed before the fix) | pre-F |
@@ -44,16 +43,35 @@ promise is proven by a test, not by a demo.
 | A run has a budget (`--budget`, default $2): the orchestrator sees spent and left, and once it is spent only "finish" is offered | budget tests; CLI flag test | pre-F |
 | Every model call is priced and logged as it ends (`model call 7 (scout): $0.03, run so far $0.41`); a failed run shows what the attempt spent, the failed step included, and an interrupted one logs it | cost meter tests | pre-F |
 | An incomplete orchestrator decision (a step without its brief, command or answer) goes back to the model with the problem named, up to twice, before the round fails | decision-fix tests | pre-F |
+| A test command that exits 0 but wrote no results file, an unreadable one, or one with 0 tests run is reported FAILED, not succeeded | results-file tests (`test_exit_0_without_test_results_is_a_failure`) | F |
+| A finished run takes a follow-up on its thread (`nexus.resume --message`): the team sees the earlier requests, answers and reports; a new run can't start with one, and a waiting or failed run refuses one | follow-up tests; CLI follow-up test | post-F |
+| Each request, a follow-up included, gets its own rounds and budget; the printed cost shows the whole run and this request | `test_each_follow_up_gets_its_own_rounds_and_budget`; CLI cost test | post-F |
+| After an approved batch the project's `verify` commands run in order without asking, stop at the first failure, and use no rounds; a verify command must run without values from a model | verify tests; config tests | post-F |
+| Each specialist carries only its role's skills, read-only and never part of a batch, and its prompt names only those | skills tests; paid A/B on impact, 2026-10-09 | post-F |
+| The engineer is told that one response's tool calls run at the same time, so it changes each file at most once per response | prompt test; still to confirm in the traces of the next real run | post-F |
+| `nexus.resume` finds the run's pipeline from any folder | `test_resume_finds_the_pipeline_from_any_folder` | post-F |
 
-## Pilot metrics (once a real pipeline exists)
+## Slice F: the first real task (done)
 
-- **Cost per run:** stays at cents per run for a mostly plain-code pipeline.
-- **Human interventions:** share of runs that stop at a gate, plus how long they wait.
-- **Correctness:** the output matches a known expected result or a manual check.
-  Every disagreement is logged during the shadow run.
+On 2026-10-07 the team fixed `DurationFormatter`'s handling of NaN and
+Infinity in impact (thread `team-20261007T232231`): a correct change, for
+$0.40 in 24 model calls. It also showed Unity tests reporting success without
+running (impact's `Run-UnityTests.ps1` returned before Unity did); fixed on
+2026-10-08 on both sides (the "exit 0 without results" row above).
 
-## Decision point
+## Metrics to keep watching
 
-After slice F (the first real task on impact), check whether the graph earns
-its keep. If the flows are linear
-with one pause, plain Python plus a state file would do; switch then.
+- **Cost per request:** printed with every run, and per call in the log.
+- **Human interventions:** how often a run stops for approval, and how often a
+  batch or command is rejected.
+- **Correctness:** the answer or change holds up on review and in the
+  project's own builds and tests.
+
+## Decision point (decided 2026-10-22: keep LangGraph)
+
+The question was whether the graph earns its keep, or whether flows are
+linear enough for plain Python and a state file. They aren't: the team loops
+through an orchestrator that picks each round, pauses at two kinds of
+approval, resumes after failures from a new process, and continues finished
+runs with follow-ups. LangGraph's checkpoints, interrupts and routing carry
+all of that, so nexus stays on it.
