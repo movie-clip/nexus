@@ -2,9 +2,11 @@
 
     python -m nexus "how does jumping work?" --project C:\\projects\\impact
 
-By default the ``team`` pipeline answers: an orchestrator sends read-only
-specialists (scout, reviewer) to explore the project, then writes the answer.
-``--pipeline ask`` uses a single read-only agent instead.
+By default the ``team`` pipeline answers: an orchestrator sends specialists,
+round by round, then writes the answer. The scout and the reviewer read the
+project; the engineer changes it through staging; the tester runs the build and
+test commands configured for it. ``--pipeline ask`` uses a single read-only
+agent instead. How the team works: ``nexus.pipelines.team`` and the README.
 
 If the team's engineer proposes changes, the run pauses (exit code 4) and
 prints them as one diff; nothing is written until you approve with
@@ -45,7 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-rounds",
         type=int,
-        help=f"team only: specialist rounds per request (default {team.DEFAULT_MAX_ROUNDS})",
+        help=(
+            "team only: specialist and tester rounds per request "
+            f"(default {team.DEFAULT_MAX_ROUNDS})"
+        ),
     )
     parser.add_argument(
         "--budget",

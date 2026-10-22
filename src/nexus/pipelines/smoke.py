@@ -8,7 +8,7 @@
 Inputs:
   scenario     what ``check`` reports:
                  ok      pass first time
-                 breach  threshold broken (a human gate goes here later)
+                 breach  threshold broken
                  flaky   one retry, then pass
                  stuck   retry until max_retries, then give up with an error
   max_retries  cap for the retry route (default 2)

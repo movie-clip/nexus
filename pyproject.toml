@@ -1,7 +1,7 @@
 [project]
 name = "nexus"
 version = "0.1.0"
-description = "Standalone LangGraph engine for unattended, durable pipelines"
+description = "An engineering assistant: a LangGraph orchestrator and Deep Agents specialists, runs started by hand"
 authors = [
     { name = "anton.ametov", email = "antonametov88@gmail.com" }
 ]
