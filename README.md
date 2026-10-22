@@ -221,7 +221,7 @@ retry, plus the traceback once if the run fails. The result (`thread_id`,
 ```
 langgraph.json    graph name -> ./src/nexus/pipelines/<module>.py:graph
 src/nexus/
-  state.py        BaseState: errors, cost_usd, artifacts, retries, verdict
+  state.py        BaseState: errors, cost_usd, retries, verdict
   retry.py        DEFAULT_RETRY (transient errors) and retry_update (capped "try again" routes)
   models.py       Claude model defaults (effort, refusal fallbacks) and cost_usd from token usage
   agents.py       shared Deep Agent pieces: read_only_agent, staged_engineer, permissions, skill shelves, run_agent
@@ -258,5 +258,5 @@ Rules:
   about 1s then 2s apart. Programming errors (`ValueError`, `KeyError`, ...) are
   not retried. Model "try again" decisions as a route capped with `retry_update`.
 - Keep state small: store large data as files and keep only their paths in
-  `artifacts`. Never put secrets in state.
+  state. Never put secrets in state.
 - Put secrets in `.env` (git-ignored).

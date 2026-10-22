@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+from typing import get_type_hints
 
 import pytest
 
@@ -140,3 +141,7 @@ def test_pipelines_must_declare_their_inputs():
     builder.add_edge(START, "a")
     with pytest.raises(InputError, match="must declare input_schema"):
         run_pipeline(builder.compile(), "t", {"n": 1})
+
+
+def test_base_state_holds_only_what_the_engine_uses():
+    assert set(get_type_hints(BaseState)) == {"errors", "cost_usd", "retries", "verdict"}
