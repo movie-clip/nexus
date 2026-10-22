@@ -125,19 +125,26 @@ project): `projects/<name>.toml`, matched by its `path`. `projects/impact.toml`
 is the example: `compile` (`dotnet build`) and `unity-tests` (Unity in
 batchmode, only when a request asks for tests), both run without asking.
 
+The shape, with made-up commands (the real ones are in `projects/impact.toml`):
+
 ```toml
-path = "C:/projects/impact"
-verify = ["compile"]  # run after every approved batch, without asking
+path = "C:/projects/myapp"
+verify = ["build"]  # run after every approved batch, without asking
 
-[commands.unity-tests]
+[commands.build]
 description = "What it checks and when to use it (the orchestrator reads this)."
-run = ["powershell", "-File", "Tools/Run-UnityTests.ps1", "-ResultsFile", "{results_file}",
-       ["-Filter", "{filter}"]]
-cwd = "Impact"
-timeout = 1800
-approval = "ask"    # or "auto": run without pausing
+run = ["dotnet", "build", "App.sln"]
+timeout = 600       # seconds; the default
+approval = "auto"   # run without pausing
 
-[commands.unity-tests.params]
+[commands.tests]
+description = "..."
+run = ["pwsh", "-File", "tools/run-tests.ps1", "-ResultsFile", "{results_file}",
+       ["-Filter", "{filter}"]]
+cwd = "src"         # inside the project; default "."
+approval = "ask"    # the default: pause for your OK
+
+[commands.tests.params]
 filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*", description = "..." }
 ```
 
@@ -151,7 +158,8 @@ filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*", description = "..." }
   your approval, so it runs without asking even if set to `"ask"`. Each must
   be runnable without values from a model: all its required params have
   defaults.
-- The command runs without nexus's secrets in its environment, with no input,
+- The command runs without any variable named in nexus's `.env` (and without
+  any `ANTHROPIC_*` variable) in its environment, with no input,
   and its whole process tree is killed at the time limit. A command's failure
   is its result: it is never retried. If nexus itself dies while a command
   runs, `nexus.resume` runs the approved command again.
@@ -180,9 +188,10 @@ prints). Setting it up, starting and stopping it:
 - Each start or resume is one trace, named after the pipeline (`team`,
   `team (resume)`). A run and its resumes are grouped under **Sessions** by
   thread id.
-- nexus's secrets (anything in its `.env` named like a key, secret, token or
-  password, and any `ANTHROPIC_*` variable) are replaced with `[secret]`
-  before a trace leaves the process. If Langfuse is down, runs work the same,
+- Secret values are replaced with `[secret]` before a trace leaves the
+  process: each variable in nexus's `.env` whose name contains KEY, SECRET,
+  TOKEN or PASSWORD, and any `ANTHROPIC_*` variable. (Other `.env` values,
+  like `LANGFUSE_BASE_URL`, are not secrets and stay readable.) If Langfuse is down, runs work the same,
   just without traces.
 
 ## Checks
@@ -247,16 +256,21 @@ tests/
 1. Create `src/nexus/pipelines/<name>.py`.
 2. Define `<Name>Input(TypedDict)` with the run inputs, and
    `<Name>State(BaseState, <Name>Input)` with the working fields.
-3. Build a plain `StateGraph(<Name>State, input_schema=<Name>Input)`, add each
-   node with `retry_policy=DEFAULT_RETRY`, and export `graph = build().compile(name="<name>")`
-   **without** a checkpointer. `langgraph dev` and `nexus.run` each add their own.
+3. Build a plain `StateGraph(<Name>State, input_schema=<Name>Input)`, add the
+   nodes (retries: see the rules below), and export
+   `graph = build().compile(name="<name>")` **without** a checkpointer.
+   `langgraph dev` and `nexus.run` each add their own.
 4. Add `"<name>": "./src/nexus/pipelines/<name>.py:graph"` to `langgraph.json`.
 
 Rules:
 - Use plain code for deterministic steps, and LLM nodes only for judgment or wording.
-- Transient failures (timeouts, 5xx) are retried by `DEFAULT_RETRY`: 3 attempts,
-  about 1s then 2s apart. Programming errors (`ValueError`, `KeyError`, ...) are
-  not retried. Model "try again" decisions as a route capped with `retry_update`.
+- Plain-code nodes get `retry_policy=DEFAULT_RETRY`: transient failures
+  (timeouts, 5xx) are retried, 3 attempts about 1s then 2s apart; programming
+  errors (`ValueError`, `KeyError`, ...) are not.
+- Nodes that call a model, or run a command, get **no** retry policy: a rerun
+  would repeat paid work or a side effect. The Anthropic SDK already retries
+  each API call, and `nexus.resume` reruns a failed step when you ask.
+- Model "try again" decisions as a route capped with `retry_update`.
 - Keep state small: store large data as files and keep only their paths in
   state. Never put secrets in state.
 - Put secrets in `.env` (git-ignored).
