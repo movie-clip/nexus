@@ -252,14 +252,29 @@ def run_agent(agent, message: str, limit: StepLimit) -> tuple[str, float]:
     """Run an agent on one message; return its final text and what it cost.
 
     The usage callback counts every model call the agent makes. If the agent
-    hit its step limit, the text says so: the report may be incomplete.
+    hit its step limit, or its last reply ended early (cut off at the output
+    limit, declined by a safety classifier, or empty), the text says so: the
+    report may be incomplete, and whoever reads it must know.
     """
     with get_usage_metadata_callback() as usage:
         result = agent.invoke({"messages": [{"role": "user", "content": message}]})
-    text = result["messages"][-1].text
+    last = result["messages"][-1]
+    notes = []
     if limit.reached:
-        text += (
-            f"\n\n(Stopped at the step limit of {limit.max_calls} model calls; "
+        notes.append(
+            f"(Stopped at the step limit of {limit.max_calls} model calls; "
             "this report may be incomplete.)"
         )
-    return text, cost_usd(usage.usage_metadata)
+    metadata = getattr(last, "response_metadata", None) or {}
+    stop_reason = metadata.get("stop_reason")
+    if stop_reason == "max_tokens":
+        notes.append(
+            "(The reply was cut off at the model's output limit; this report is incomplete.)"
+        )
+    elif stop_reason == "refusal":
+        category = (metadata.get("stop_details") or {}).get("category")
+        why = f"refusal: {category}" if category else "refusal"
+        notes.append(f"(The model declined to continue ({why}); this report is incomplete.)")
+    elif not last.text.strip():
+        notes.append("(The agent ended without a report.)")
+    return "\n\n".join([last.text, *notes]).strip(), cost_usd(usage.usage_metadata)

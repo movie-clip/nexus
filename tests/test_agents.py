@@ -136,3 +136,41 @@ def test_hide_tools_also_hides_tools_given_as_dicts():
     )
     HideTools(frozenset({"task"})).wrap_model_call(request, lambda r: seen.append(r.tools))
     assert seen == [[{"name": "grep", "description": "d"}]]
+
+
+# --- replies that ended early ---------------------------------------------------------
+
+
+def ended(text: str, stop_reason: str, **metadata):
+    message = final(text)
+    message.response_metadata.update(stop_reason=stop_reason, **metadata)
+    return message
+
+
+def report_of(project, last_message) -> str:
+    limit = StepLimit(3)
+    agent = read_only_agent(str(project), scripted(last_message), "You scout.", "scout", limit)
+    return run_agent(agent, "Find things.", limit)[0]
+
+
+def test_a_reply_cut_off_at_the_output_limit_says_so(project):
+    text = report_of(project, ended("The jump code is in", "max_tokens"))
+    assert text == (
+        "The jump code is in\n\n(The reply was cut off at the model's output limit; "
+        "this report is incomplete.)"
+    )
+
+
+def test_a_declined_reply_says_so(project):
+    details = {"type": "refusal", "category": "cyber", "explanation": "x"}
+    text = report_of(project, ended("", "refusal", stop_details=details))
+    assert text == "(The model declined to continue (refusal: cyber); this report is incomplete.)"
+    assert "refusal)" in report_of(project, ended("", "refusal"))  # no category given
+
+
+def test_an_empty_reply_says_so(project):
+    assert report_of(project, ended("", "end_turn")) == "(The agent ended without a report.)"
+
+
+def test_a_finished_reply_is_untouched(project):
+    assert report_of(project, ended("Done.", "end_turn")) == "Done."

@@ -84,7 +84,9 @@ request -> orchestrator -+- scout -----------------------------------+
     each round, so a request can only go over by the round that crossed it;
   - each specialist gets a number of model calls (scout and reviewer 30,
     engineer 60, `--pipeline ask` 30). On the last one it can't use tools and
-    must write its report, which then says it was cut short.
+    must write its report, which then says it was cut short. A report also
+    says so when the model's last reply was cut off at its output limit, was
+    declined by a safety classifier, or was empty.
 
   When rounds or budget run out, the only choice offered is "finish". Each
   follow-up is a new request with its own rounds and budget; the printed cost

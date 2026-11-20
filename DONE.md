@@ -42,6 +42,7 @@ by a demo; a live run backs it where a test can't reach the real API.
 | Deep Agents' own files (oversized messages and tool results, saved history) never reach the project or the engineer's batch: they are kept in memory, where the agent can still read them | offload tests with a 210k-character brief (failed before the fix) | pre-F |
 | A malformed approval answer asks the question again; it never fails the run or gets replayed | malformed-answer tests for batches and commands | pre-F |
 | Each specialist has a model-call limit (set per role in code): the last call may not use tools and is told to write its report, a model that ignores that is stopped anyway, and the report says it was cut short | step-limit tests; live `tool_choice: none` call after tool use, 2026-10-07 | pre-F |
+| A specialist's report says so when its last reply was cut off at the output limit, declined (with the category), or empty | early-ending tests | 2026-11-20 |
 | Specialists can't start Deep Agents' sub-subagents (`task`), whose calls no limit would count: the tool is not offered and is refused if called | hidden-tool tests | pre-F |
 | Each request has a budget (`--budget`): the orchestrator sees spent and left, and once it is spent only "finish" is offered | budget tests; CLI flag test | pre-F |
 | Every model call is priced and logged as it ends (`model call 7 (scout): $0.03, run so far $0.41`); a failed run shows what the attempt spent, the failed step included, and an interrupted one logs it | cost meter tests | pre-F |
