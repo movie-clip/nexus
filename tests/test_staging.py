@@ -178,6 +178,41 @@ def test_apply_refuses_files_changed_since_staging(project, backend):
     assert raw(project / "src" / "A.cs") == b"someone else edited this\r\n"
 
 
+def test_apply_is_all_or_nothing(project, backend):
+    backend.edit("/src/A.cs", "int x = 1;", "int x = 2;")
+    backend.write("/src/B.cs", "class B {}\n")
+    backend.delete("/README.md")
+    batch = backend.changes()
+    (project / "src" / "A.cs").write_bytes(b"someone else edited this\r\n")
+
+    assert apply_changes(project, batch) == ([], ["/src/A.cs"])
+    # The files that could have been written were left alone too.
+    assert not (project / "src" / "B.cs").exists()
+    assert raw(project / "README.md") == b"hello\n"
+
+
+def test_a_failed_write_puts_back_what_was_already_written(project, backend, monkeypatch):
+    backend.delete("/README.md")
+    backend.edit("/src/A.cs", "int x = 1;", "int x = 2;")
+    backend.write("/src/B.cs", "class B {}\n")
+    backend.write("/src/C.cs", "class C {}\n")
+    batch = backend.changes()
+    put = StagedBackend._put
+
+    def failing_put(target, text):
+        if target.name == "C.cs":
+            raise PermissionError("locked")
+        put(target, text)
+
+    monkeypatch.setattr(StagedBackend, "_put", staticmethod(failing_put))
+    with pytest.raises(PermissionError):
+        apply_changes(project, batch)
+
+    assert raw(project / "README.md") == b"hello\n"  # the delete was undone
+    assert raw(project / "src" / "A.cs") == CRLF_FILE.encode()  # the edit was undone
+    assert not (project / "src" / "B.cs").exists()  # the new file was removed
+
+
 def test_apply_twice_is_safe(project, backend):
     backend.edit("/src/A.cs", "int x = 1;", "int x = 2;")
     batch = backend.changes()

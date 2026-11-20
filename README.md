@@ -45,13 +45,14 @@ request -> orchestrator -+- scout -----------------------------------+
   uv run python -m nexus.resume --thread <id> --decision reject --note "what to change"
   ```
 
-  Approve writes the batch, skipping any file that changed on disk since it was
-  staged. Reject writes nothing and passes your note to the orchestrator.
+  Approve writes the whole batch or none of it: if any file changed on disk
+  since it was staged, nothing is written and the orchestrator is told which
+  files. Reject writes nothing and passes your note to the orchestrator.
   Line endings are kept line by line, and the diff warns if a change would
   alter endings it can't show. The engineer cannot write inside `.git`, touch
   `.env` files, run commands, or commit. It writes tests only when the
   request asks for them.
-- **Verify**: after you approve a batch, the project's `verify` commands (for
+- **Verify**: after an approved batch is written, the project's `verify` commands (for
   impact: `compile`) run at once, without asking, in order, stopping at the
   first failure. The orchestrator reads their reports and can send the
   engineer to fix a failure. They don't use up rounds.

@@ -20,6 +20,7 @@ with universal newlines and writes back with ``\\n``, which would turn a
 one-line edit of a CRLF file into a whole-file change.
 """
 
+import contextlib
 import difflib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -204,29 +205,42 @@ class StagedBackend(BackendProtocol):
 
 
 def apply_changes(project: str | Path, batch: list[Change]) -> tuple[list[str], list[str]]:
-    """Write an approved batch to the project.
+    """Write an approved batch to the project: all of it, or none of it.
 
-    A file is only written if it still holds the ``before`` text the user
-    approved against; otherwise it is reported as a conflict and left alone.
-    Re-applying a batch is safe: files already at ``after`` count as applied.
-    Returns (applied paths, conflict paths).
+    Every file must still hold the ``before`` text the user approved against.
+    If any doesn't, nothing is written and those files are returned as
+    conflicts. If a write fails partway, the files already written are put
+    back and the error is raised. Re-applying a batch is safe: files already
+    at ``after`` count as applied.
+    Returns (applied paths, conflict paths); one of them is always empty.
     """
     root = Path(project).resolve()
-    applied, conflicts = [], []
-    for change in batch:
-        target = root / change.path.lstrip("/")
-        current = _read_raw(target)
-        if current == change.after:
-            applied.append(change.path)
-        elif current != change.before:
-            conflicts.append(change.path)
-        elif change.after is None:
-            target.unlink()
-            applied.append(change.path)
-        else:
-            StagedBackend._put(target, change.after)
-            applied.append(change.path)
-    return applied, conflicts
+    targets = [(change, root / change.path.lstrip("/")) for change in batch]
+    current = {change.path: _read_raw(target) for change, target in targets}
+    conflicts = [c.path for c in batch if current[c.path] not in (c.before, c.after)]
+    if conflicts:
+        return [], conflicts
+    undo: list[tuple[Path, str | None]] = []
+    try:
+        for change, target in targets:
+            if current[change.path] == change.after:
+                continue
+            undo.append((target, change.before))  # first, so a half-written file is put back too
+            _set(target, change.after)
+    except OSError:
+        for target, before in reversed(undo):
+            with contextlib.suppress(OSError):
+                _set(target, before)
+        raise
+    return [change.path for change in batch], []
+
+
+def _set(target: Path, text: str | None) -> None:
+    """Make the file hold ``text``; ``None`` removes it."""
+    if text is None:
+        target.unlink(missing_ok=True)
+    else:
+        StagedBackend._put(target, text)
 
 
 def _read_raw(path: Path) -> str | None:

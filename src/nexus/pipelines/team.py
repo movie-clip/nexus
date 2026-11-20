@@ -3,7 +3,7 @@
     START -> orchestrator -+- scout ---------------------------------------+
                ^           +- reviewer ------------------------------------+
                |           +- engineer -+- (no changes) -------------------+
-               |           |            +- approve -> apply -+- (rejected) +
+               |           |            +- approve -> apply -+- (no write) +
                |           |                                 +- verify ----+
                |           +- tester ---+- (bad command) ------------------+
                |           |            +- approve_command -+- (rejected) -+
@@ -28,7 +28,7 @@ every report since the run began.
 Scout and reviewer are read-only Deep Agents (``nexus.agents.read_only_agent``).
 The engineer's writes are staged (``nexus.staging``): when it is done, the run
 pauses at ``approve`` and shows the whole batch as one diff. The user approves
-(``apply`` writes it to the project, skipping files changed on disk since) or
+(``apply`` writes it to the project, or none of it if a file changed on disk since) or
 rejects with a note; either way the outcome goes back to the orchestrator as a
 report from "user". After an approval, ``verify`` runs the project's ``verify``
 commands (a compile, say) in order without asking, stopping at the first
@@ -258,6 +258,9 @@ batch, the project's checks (such as a compile) run automatically.
 Report, file by file, what you changed and why; anything you were unsure \
 about; and how to verify the change (what to build or test).""",
 )
+
+# What apply reports to the route after it: only a written batch is verified.
+APPLIED, NOT_APPLIED = "applied", "not_applied"
 
 SPECIALISTS = [*READ_ONLY_SPECIALISTS, "engineer"]  # the roles that run a model
 Step = Literal["scout", "reviewer", "engineer", "tester", "finish"]
@@ -583,14 +586,18 @@ def build(
     def apply(state: TeamState) -> dict:
         batch = state["pending"]
         approval = state["approval"]
+        written = False
         if approval["decision"] == "approve":
             applied, conflicts = apply_changes(state["project"], [Change(**c) for c in batch])
-            text = f"The user approved the batch. Applied: {', '.join(applied) or 'none'}."
+            written = not conflicts
             if conflicts:
-                text += (
-                    f" Not applied, because these files changed on disk after staging: "
-                    f"{', '.join(conflicts)}."
+                text = (
+                    "The user approved the batch, but nothing was written to the project, "
+                    f"because these files changed on disk after staging: {', '.join(conflicts)}. "
+                    "A batch is applied whole or not at all."
                 )
+            else:
+                text = f"The user approved the batch. Applied: {', '.join(applied) or 'none'}."
             log.info("applied=%d conflicts=%d", len(applied), len(conflicts))
         else:
             text = "The user rejected the batch; nothing was written to the project."
@@ -602,7 +609,7 @@ def build(
             "brief": "Approve the engineer's changes?",
             "report": text,
         }
-        return {"reports": [report], "pending": []}
+        return {"reports": [report], "pending": [], "verdict": APPLIED if written else NOT_APPLIED}
 
     def tester(state: TeamState, config: RunnableConfig) -> dict:
         """Check the orchestrator's command and fill it in; nothing runs yet."""
@@ -701,7 +708,7 @@ def build(
     graph.add_edge("approve", "apply")
     graph.add_conditional_edges(
         "apply",
-        lambda state: "verify" if state["approval"]["decision"] == "approve" else "orchestrator",
+        lambda state: "verify" if state["verdict"] == APPLIED else "orchestrator",
         ["verify", "orchestrator"],
     )
     # Not retried, like run_command; a resume after a crash runs it again.

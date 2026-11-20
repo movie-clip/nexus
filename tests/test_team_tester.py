@@ -237,6 +237,19 @@ def test_an_approved_batch_is_verified_without_asking(project, tmp_path):
     assert "Run automatically after the approved change: tests" in orch.calls[-1][1][1][1]
 
 
+def test_a_batch_that_was_not_applied_is_not_verified(project, tmp_path):
+    with_verify(tmp_path, project, '["build"]')
+    orch = ScriptedOrchestrator(decide("engineer", brief="b"), decide("finish", answer="a"))
+    graph = make_graph(tmp_path, orch, [edit_jump()])
+    start(project, graph)
+    (project / "Jump.cs").write_bytes(b"edited by hand\r\n")
+
+    result = resume_pipeline("t", {"decision": "approve"}, open_runs_db(), graph=graph)
+
+    assert [r["role"] for r in result.state["reports"]] == ["engineer", "user"]
+    assert "nothing was written" in result.state["reports"][-1]["report"]
+
+
 def test_verify_stops_at_the_first_failure(project, tmp_path):
     write_config(
         tmp_path / "projects",
