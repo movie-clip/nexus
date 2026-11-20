@@ -154,10 +154,13 @@ approval = "ask"    # the default: pause for your OK
 filter = { pattern = "[A-Za-z_][A-Za-z0-9_.]*", description = "..." }
 ```
 
-- A command is an argument list, never a shell line, and `.bat`/`.cmd`
-  programs are refused (Windows would re-parse them as a shell line). Each
-  param value must fully match its `pattern`, or the command is refused before
-  it is shown to you. A nested list is left out unless its params have values.
+- A command is an argument list, never a shell line. Each param value must
+  fully match its `pattern`, or the command is refused before it is shown to
+  you. A nested list is left out unless its params have values.
+- A `.bat`/`.cmd` program may run (`npm` and `npx` are `.cmd` files on
+  Windows), but Windows would re-parse its arguments as a shell line, so every
+  argument may hold only letters, digits and `_ @ . , : / \ = + -`. Anything
+  else, a space included, is refused before the command is shown to you.
 - `approval = "ask"` pauses the run and prints the exact command, folder and
   time limit; answer with `nexus.resume --decision approve|reject`.
 - `verify` lists commands to run after every approved batch. Listing one is

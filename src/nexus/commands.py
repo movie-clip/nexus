@@ -17,6 +17,8 @@ tables. ``find_config`` picks the file whose ``path`` is the ``--project`` folde
 A command is an argument list, never a shell line. ``{param}`` placeholders are
 filled from values the orchestrator chose; each value must fully match its
 param's ``pattern``, so it can't smuggle in extra arguments or commands. A
+batch file (``npm`` and ``npx`` are ``.cmd`` files on Windows) may run, but only
+with arguments made of letters, digits and ``_ @ . , : / \\ = + -``. A
 nested list is an optional group, left out unless every placeholder in it has
 a value. ``{results_file}`` is a path nexus provides outside the project for a
 test-results file (NUnit XML is summarized). A command given it must write it:
@@ -63,6 +65,8 @@ PROJECTS_DIR = NEXUS_ROOT / "projects"
 BUILTINS = frozenset({"results_file"})
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 COMMAND_NAME = r"[a-z0-9][a-z0-9-]*"
+BATCH_SUFFIXES = (".bat", ".cmd")
+BATCH_SAFE = re.compile(r"[A-Za-z0-9_@.,:/\\=+-]+")  # see _check_batch_args
 
 Arg = str | list[str]
 
@@ -252,6 +256,8 @@ def prepare(
                     raise CommandError(f"{name} needs a value for {', '.join(missing)}")
                 argv.append(_fill(arg, values))
         argv[0] = _program(argv[0], cwd)
+        if Path(argv[0]).suffix.lower() in BATCH_SUFFIXES:
+            _check_batch_args(argv)
         steps.append(argv)
     return Prepared(
         name=name,
@@ -275,20 +281,31 @@ def _fill(arg: str, values: dict[str, str]) -> str:
 
 
 def _program(program: str, cwd: Path) -> str:
-    """The full path of the program, refusing batch files.
-
-    Windows runs .bat/.cmd files through cmd.exe, which re-parses the
-    arguments as a shell line; that would undo the protection of passing a list.
-    """
+    """The full path of the program."""
     if "/" in program or "\\" in program:
         found = str((cwd / program).resolve()) if (cwd / program).is_file() else None
     else:
         found = shutil.which(program)
     if found is None:
         raise CommandError(f"program {program!r} not found")
-    if Path(found).suffix.lower() in (".bat", ".cmd"):
-        raise CommandError(f"{found} is a batch file; list the program it runs instead")
     return found
+
+
+def _check_batch_args(argv: list[str]) -> None:
+    """Refuse a batch file any argument cmd.exe could read as more than a word.
+
+    Windows runs .bat/.cmd files (npm, npx and other shims are such files)
+    through cmd.exe, which re-parses the arguments as a shell line; that would
+    undo the protection of passing a list. So every argument, whether the
+    config wrote it or a model chose its value, may hold only characters that
+    mean nothing to cmd.exe.
+    """
+    for arg in argv[1:]:
+        if not BATCH_SAFE.fullmatch(arg):
+            raise CommandError(
+                f"argument {arg!r} can't be passed to the batch file {argv[0]}: only letters, "
+                "digits and _ @ . , : / \\ = + - are allowed (no spaces)"
+            )
 
 
 def _join(argv: list[str]) -> str:

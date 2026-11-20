@@ -218,23 +218,73 @@ def test_prepare_needs_values_for_required_params(tmp_path, project):
         commands.prepare(config, project, "x", {}, tmp_path / "1-x")
 
 
-def test_missing_programs_and_batch_files_are_refused(tmp_path, project):
-    (project / "build.cmd").write_text("@echo off\n")
-    body = """\
-        [commands.missing]
-        description = "d"
-        run = ["no-such-program-xyz"]
-
-        [commands.batch]
-        description = "d"
-        run = ["./build.cmd"]
-    """
+def test_missing_programs_are_refused(tmp_path, project):
+    body = '[commands.missing]\ndescription = "d"\nrun = ["no-such-program-xyz"]'
     write_config(tmp_path / "projects", project, body)
     config = commands.find_config(project, tmp_path / "projects")
     with pytest.raises(CommandError, match="not found"):
         commands.prepare(config, project, "missing", {}, tmp_path / "1-x")
-    with pytest.raises(CommandError, match="is a batch file"):
-        commands.prepare(config, project, "batch", {}, tmp_path / "1-x")
+
+
+# --- batch files (npm, npx and the like are .cmd files on Windows) ---------------
+
+SHIM_CONFIG = """\
+    [commands.shim]
+    description = "d"
+    run = ["./shim.cmd", "run", "--out={out}", ["{extra}"]]
+    approval = "auto"
+
+    [commands.shim.params]
+    out = { pattern = ".+", default = "dist" }
+    extra = { pattern = ".+" }
+
+    [commands.spaced]
+    description = "d"
+    run = ["./shim.cmd", "two words"]
+
+    [commands.plain]
+    description = "d"
+    run = [PYTHON, "tool.py", "{extra}"]
+    params.extra = { pattern = ".+" }
+"""
+
+
+@pytest.fixture
+def shim_config(tmp_path, project):
+    (project / "shim.cmd").write_text("@echo off\necho got %*\n")
+    write_config(tmp_path / "projects", project, SHIM_CONFIG)
+    return commands.find_config(project, tmp_path / "projects")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="batch files only run on Windows")
+def test_a_batch_file_runs_with_plain_arguments(shim_config, project, tmp_path):
+    value = r"C:\a_B-1\x.y,z@1+2/3"  # every allowed kind of character
+    prepared = commands.prepare(shim_config, project, "shim", {"extra": value}, tmp_path / "1")
+    outcome = commands.run_prepared(prepared)
+    assert outcome.exit_code == 0
+    assert f"got run --out=dist {value}" in Path(prepared.log_file).read_text()
+
+
+@pytest.mark.parametrize(
+    "value", ["a b", "a&calc", "%PATH%", 'a"b', "a^b", "a|b", "(a)", "a;b", "a!b", "a>b", "a<b"]
+)
+def test_a_batch_file_refuses_an_argument_cmd_would_read_as_a_shell_line(
+    shim_config, project, tmp_path, value
+):
+    with pytest.raises(CommandError) as refused:
+        commands.prepare(shim_config, project, "shim", {"extra": value}, tmp_path / "1")
+    assert f"argument {value!r} can't be passed to the batch file" in str(refused.value)
+    assert "shim.cmd" in str(refused.value)
+
+
+def test_a_batch_file_refuses_such_an_argument_from_the_config_too(shim_config, project, tmp_path):
+    with pytest.raises(CommandError, match="argument 'two words' can't be passed"):
+        commands.prepare(shim_config, project, "spaced", {}, tmp_path / "1")
+
+
+def test_other_programs_take_any_argument(shim_config, project, tmp_path):
+    prepared = commands.prepare(shim_config, project, "plain", {"extra": "a b&c"}, tmp_path / "1")
+    assert prepared.steps[0][-1] == "a b&c"
 
 
 def test_no_config_means_no_commands(project, tmp_path):
