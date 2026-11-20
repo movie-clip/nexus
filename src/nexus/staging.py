@@ -18,6 +18,9 @@ and LF, and the review diff doesn't show endings, so any ending the change
 didn't need to touch must stay byte-identical. Deep Agents' own ``edit`` reads
 with universal newlines and writes back with ``\\n``, which would turn a
 one-line edit of a CRLF file into a whole-file change.
+
+Only UTF-8 text can be changed: for a file in another encoding, or a binary
+file, ``write_file``, ``edit_file`` and ``delete`` return an error.
 """
 
 import contextlib
@@ -116,7 +119,10 @@ class StagedBackend(BackendProtocol):
             target = self._staged_file(file_path)
         except ValueError as exc:
             return WriteResult(error=str(exc))
-        current = self._current_text(file_path)
+        try:
+            current = self._current_text(file_path)
+        except UnicodeDecodeError:
+            return WriteResult(error=_not_text(file_path))
         if current is not None:
             text = restore_endings(current, _to_lf(content))
         else:
@@ -129,7 +135,10 @@ class StagedBackend(BackendProtocol):
     def edit(
         self, file_path: str, old_string: str, new_string: str, replace_all: bool = False
     ) -> EditResult:
-        current = self._current_text(file_path)
+        try:
+            current = self._current_text(file_path)
+        except UnicodeDecodeError:
+            return EditResult(error=_not_text(file_path))
         if current is None:
             return EditResult(error=f"Error: File '{file_path}' not found")
         result = perform_string_replacement(
@@ -151,6 +160,10 @@ class StagedBackend(BackendProtocol):
             return DeleteResult(error=f"Error: '{file_path}' is a directory; delete its files")
         if not exists_in_project and file_path not in self.touched:
             return DeleteResult(error=f"Error: '{file_path}' not found")
+        try:
+            _read_raw(self._project_file(file_path))  # the batch records the deleted text
+        except UnicodeDecodeError:
+            return DeleteResult(error=_not_text(file_path))
         self.touched.discard(file_path)
         self._staged_file(file_path).unlink(missing_ok=True)
         if exists_in_project:
@@ -192,7 +205,10 @@ class StagedBackend(BackendProtocol):
         if folder.is_dir():
             for sibling in sorted(folder.iterdir()):
                 if sibling.is_file() and sibling.suffix == Path(file_path).suffix:
-                    text = _read_raw(sibling)
+                    try:
+                        text = _read_raw(sibling)
+                    except UnicodeDecodeError:
+                        continue
                     if text is not None and "\n" in text:
                         return _ending_of(text)
         return "\n"
@@ -216,8 +232,16 @@ def apply_changes(project: str | Path, batch: list[Change]) -> tuple[list[str], 
     """
     root = Path(project).resolve()
     targets = [(change, root / change.path.lstrip("/")) for change in batch]
-    current = {change.path: _read_raw(target) for change, target in targets}
-    conflicts = [c.path for c in batch if current[c.path] not in (c.before, c.after)]
+    current: dict[str, str | None] = {}
+    conflicts = []
+    for change, target in targets:
+        try:
+            current[change.path] = _read_raw(target)
+        except UnicodeDecodeError:  # no longer text, so it changed
+            conflicts.append(change.path)
+            continue
+        if current[change.path] not in (change.before, change.after):
+            conflicts.append(change.path)
     if conflicts:
         return [], conflicts
     undo: list[tuple[Path, str | None]] = []
@@ -244,11 +268,20 @@ def _set(target: Path, text: str | None) -> None:
 
 
 def _read_raw(path: Path) -> str | None:
-    """File text with its line endings untouched; None if it doesn't exist."""
+    """File text with its line endings untouched; None if it doesn't exist.
+
+    Raises ``UnicodeDecodeError`` for a file that isn't UTF-8 text (another
+    encoding, or binary). The tools turn that into an error the agent can
+    read, as Deep Agents' own ``FilesystemBackend`` does.
+    """
     if not path.is_file():
         return None
     with open(path, encoding="utf-8", newline="") as f:
         return f.read()
+
+
+def _not_text(file_path: str) -> str:
+    return f"Error: '{file_path}' is not UTF-8 text, so it can't be changed"
 
 
 def restore_endings(original: str, new_lf: str) -> str:

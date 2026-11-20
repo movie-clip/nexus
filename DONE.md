@@ -28,6 +28,7 @@ by a demo; a live run backs it where a test can't reach the real API.
 | Approve applies the batch from a new process; reject writes nothing and passes the note on | approve/reject tests over a fresh SQLite connection; live reject | C |
 | A batch is applied whole or not at all: if a file changed on disk while waiting, nothing is written and nothing is verified; if a write fails partway, the files already written are put back | all-or-nothing, failed-write and not-verified tests | C, 2026-11-20 |
 | Line endings are kept line by line, and the diff warns about ending changes it can't show | mixed-ending tests incl. a replay of a real impact file; live re-stage | C |
+| A file that isn't UTF-8 text (another encoding, binary) can't be changed: the engineer gets a tool error and the run goes on; a byte order mark is kept | not-UTF-8 tests at the backend and through the pipeline; BOM test | C, 2026-11-20 |
 | The engineer cannot write `.git` or `.env`, read `.env`, escape the project, or run commands | engineer limit tests (exact errors) | C |
 | The tester runs only commands listed in the project's config; values that don't fully match their pattern, unknown commands and params, batch files and missing programs are refused before anything is shown or run | command config and prepare tests; pipeline refusal tests | D |
 | An "ask" command pauses with the exact command line and runs only on approve; "auto" runs at once; a rejection runs nothing and doesn't use a round | approval flow tests over a fresh SQLite connection | D |

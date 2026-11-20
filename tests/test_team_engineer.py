@@ -181,6 +181,22 @@ def test_engineer_tool_limits(project, tmp_path, call, error):
     assert backend.changes() == []
 
 
+def test_a_file_that_is_not_utf8_is_a_tool_error_not_a_failed_run(project):
+    (project / "Old.cs").write_bytes("привет\r\n".encode("cp1251"))
+    engineer = scripted(
+        tool_call("edit_file", file_path="/Old.cs", old_string="x", new_string="y"),
+        final("Old.cs is not UTF-8, so I could not change it."),
+    )
+    orch = ScriptedOrchestrator(decide("engineer", brief="b"), decide("finish", answer="a"))
+    result = start(project, make_graph(orch, [engineer]))
+
+    assert result.status == "completed"
+    assert "could not change it" in result.state["reports"][0]["report"]
+    tool_result = engineer.seen_prompts[-1][-1]
+    assert tool_result.status == "error"
+    assert tool_result.text == "Error: '/Old.cs' is not UTF-8 text, so it can't be changed"
+
+
 def test_diff_warns_about_line_ending_changes_it_cannot_show():
     diff = team.unified_diff([{"path": "/m.cs", "before": "a\r\nb\r\n", "after": "a\nb\r\nc\n"}])
     assert diff.startswith("WARNING /m.cs: line endings change on 1 unchanged lines")

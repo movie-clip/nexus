@@ -49,7 +49,9 @@ request -> orchestrator -+- scout -----------------------------------+
   since it was staged, nothing is written and the orchestrator is told which
   files. Reject writes nothing and passes your note to the orchestrator.
   Line endings are kept line by line, and the diff warns if a change would
-  alter endings it can't show. The engineer cannot write inside `.git`, touch
+  alter endings it can't show. Only UTF-8 text can be changed: for a file in
+  another encoding, or a binary file, the engineer gets an error it can report.
+  The engineer cannot write inside `.git`, touch
   `.env` files, run commands, or commit. It writes tests only when the
   request asks for them.
 - **Verify**: after an approved batch is written, the project's `verify` commands (for

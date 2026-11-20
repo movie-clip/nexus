@@ -154,6 +154,45 @@ def test_deleted_file_can_be_written_again(backend):
     assert backend.changes() == [Change("/README.md", "hello\n", "back\n")]
 
 
+# --- files that are not UTF-8 text ---------------------------------------------
+
+CP1251 = "привет\r\n".encode("cp1251")
+
+
+@pytest.mark.parametrize("content", [CP1251, b"\x89PNG\xff\xfe\x00"])
+def test_a_file_that_is_not_utf8_cannot_be_changed(project, backend, content):
+    (project / "src" / "Old.cs").write_bytes(content)
+    for result in (
+        backend.edit("/src/Old.cs", "x", "y"),
+        backend.write("/src/Old.cs", "new\n"),
+        backend.delete("/src/Old.cs"),
+    ):
+        assert result.error == "Error: '/src/Old.cs' is not UTF-8 text, so it can't be changed"
+    assert backend.changes() == []
+    assert raw(project / "src" / "Old.cs") == content
+
+
+def test_a_new_file_ignores_a_neighbour_that_is_not_utf8(project, backend):
+    (project / "src" / "0.cs").write_bytes(CP1251)  # sorts before A.cs
+    assert backend.write("/src/New.cs", "class New {}\n").error is None
+    assert backend.changes() == [Change("/src/New.cs", None, "class New {}\r\n")]
+
+
+def test_a_byte_order_mark_is_kept(project, backend):
+    (project / "src" / "Bom.cs").write_bytes(b"\xef\xbb\xbfclass Bom { int x = 1; }\r\n")
+    assert backend.edit("/src/Bom.cs", "x = 1", "x = 2").error is None
+    apply_changes(project, backend.changes())
+    assert raw(project / "src" / "Bom.cs") == b"\xef\xbb\xbfclass Bom { int x = 2; }\r\n"
+
+
+def test_apply_treats_a_file_that_is_no_longer_utf8_as_changed(project, backend):
+    backend.edit("/src/A.cs", "int x = 1;", "int x = 2;")
+    batch = backend.changes()
+    (project / "src" / "A.cs").write_bytes(CP1251)
+    assert apply_changes(project, batch) == ([], ["/src/A.cs"])
+    assert raw(project / "src" / "A.cs") == CP1251
+
+
 # --- applying an approved batch -----------------------------------------------
 
 
