@@ -164,27 +164,65 @@ def test_cost_matches_longest_model_id_first():
     assert cost_usd({"claude-opus-5": usage}) == pytest.approx(5.00)
 
 
-@pytest.mark.parametrize(
-    "model, input_usd, output_usd",
-    [
-        # Haiku 5.5 costs more above 100K prompt tokens; usage is summed over
-        # calls, so nexus uses the higher rate: it may overstate, never understate.
-        ("claude-haiku-5-5", 0.50, 2.50),
-        ("claude-sonnet-4-6", 3.00, 15.00),
-        ("claude-opus-4-7", 5.00, 25.00),
-        ("claude-opus-4-6", 5.00, 25.00),
-        ("claude-mythos-5-1", 10.00, 50.00),
-    ],
-)
-def test_every_current_model_has_its_own_price(model, input_usd, output_usd, caplog):
+# Anthropic's pricing page, read 2026-11-20: every model that isn't retired, as
+# (input, output, cache read) in US dollars per million tokens.
+PRICING_PAGE = {
+    "claude-fable-5-2": (8.00, 40.00, 0.20),
+    "claude-mythos-5-2": (8.00, 40.00, 0.20),
+    "claude-fable-5-1": (10.00, 50.00, 0.25),
+    "claude-mythos-5-1": (10.00, 50.00, 0.25),
+    "claude-fable-5": (10.00, 50.00, 1.00),
+    "claude-mythos-5": (10.00, 50.00, 1.00),
+    "claude-opus-5-5": (4.00, 20.00, 0.20),
+    "claude-opus-5": (5.00, 25.00, 0.50),
+    "claude-opus-4-8": (5.00, 25.00, 0.50),
+    "claude-opus-4-7": (5.00, 25.00, 0.50),
+    "claude-opus-4-6": (5.00, 25.00, 0.50),
+    "claude-opus-4-5": (5.00, 25.00, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00, 0.10),
+    "claude-sonnet-5": (2.00, 10.00, 0.20),
+    "claude-sonnet-4-6": (3.00, 15.00, 0.30),
+    "claude-sonnet-4-5": (3.00, 15.00, 0.30),
+    # Haiku 5.5 costs less up to 100K prompt tokens ($0.10 / $0.50 / $0.01);
+    # usage is summed over calls, so nexus uses the higher rate: it may
+    # overstate, never understate.
+    "claude-haiku-5-5": (0.50, 2.50, 0.05),
+    "claude-haiku-4-5": (1.00, 5.00, 0.10),
+}
+
+
+@pytest.mark.parametrize("model", PRICING_PAGE)
+@pytest.mark.parametrize("suffix", ["", "-20261001"])  # a dated ID is the same model
+def test_every_current_model_has_its_own_price(model, suffix, caplog):
+    input_usd, output_usd, cache_read_usd = PRICING_PAGE[model]
     usage: UsageMetadata = {
-        "input_tokens": 1_000_000,
+        "input_tokens": 2_000_000,
         "output_tokens": 1_000_000,
-        "total_tokens": 2_000_000,
+        "total_tokens": 3_000_000,
+        "input_token_details": {"cache_read": 1_000_000},
     }
     with caplog.at_level(logging.WARNING, logger="nexus.models"):
-        assert cost_usd({model: usage}) == pytest.approx(input_usd + output_usd)
+        cost = cost_usd({model + suffix: usage})
+    assert cost == pytest.approx(input_usd + cache_read_usd + output_usd)
     assert "no price" not in caplog.text
+
+
+def test_the_price_table_is_the_pricing_page():
+    assert set(PRICES) == set(PRICING_PAGE)
+
+
+@pytest.mark.parametrize(
+    "model", ["claude-fable-5-3", "claude-opus-5-9", "claude-sonnet-5-5-preview"]
+)
+def test_a_new_model_is_never_priced_as_an_older_one(model, caplog):
+    usage: UsageMetadata = {
+        "input_tokens": 0,
+        "output_tokens": 1_000_000,
+        "total_tokens": 1_000_000,
+    }
+    with caplog.at_level(logging.WARNING, logger="nexus.models"):
+        assert cost_usd({model: usage}) == pytest.approx(UNKNOWN_PRICE.output)
+    assert f"no price for model '{model}'" in caplog.text
 
 
 def test_cache_writes_cost_a_quarter_more_than_input():

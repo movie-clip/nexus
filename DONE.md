@@ -17,7 +17,7 @@ by a demo; a live run backs it where a test can't reach the real API.
 | A failed run returns `status=failed`, the failed node and the error as JSON, keeps the work finished before the failure, logs the traceback once, and exits 3 | failure-report tests, subprocess test | 2 |
 | `python -m nexus "<request>" --project P` answers about P, with cost in US dollars | ask pipeline test (scripted model); first live run | A |
 | The ask agent cannot change the project: no write tools offered, writes denied, traversal blocked, `.env` unreadable, no shell | agent permission tests (exact error per case) | A |
-| Cost counts every model call, including subagents and cache reads and writes; unknown models are never counted as free | cost tests | A |
+| Cost counts every model call, including subagents and cache reads and writes; unknown models are never counted as free, and a new model is never priced as an older one with a similar name; the price table matches Anthropic's pricing page (read 2026-11-20) | cost tests; per-model price tests | A, 2026-11-20 |
 | The orchestrator routes each round to scout, reviewer or finish, from structured output (no forced tool use) | team routing tests (scripted orchestrator) | B |
 | Specialists see only their brief; the orchestrator sees every brief and report | context isolation tests | B |
 | The round cap holds: with no rounds left, only "finish" is offered (verified against the live API) | round-cap tests; live schema call | B |

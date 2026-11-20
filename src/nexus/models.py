@@ -6,6 +6,7 @@ run can report what it spent.
 """
 
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -34,12 +35,15 @@ class Price:
     cache_write: float  # 5-minute cache writes
 
 
-# Anthropic first-party API rates (claude-api reference, cached 2026-10-06).
+# Anthropic first-party API rates, from the pricing page
+# (platform.claude.com/docs/en/about-claude/pricing, read 2026-11-20).
 # Cache writes (5-minute) cost 1.25x input. Cache reads are 0.1x input, except
-# where Anthropic set them lower: Fable 5.1 / Mythos 5.1 0.025x, Opus 5.5 0.05x.
-# Every current model is listed: a refusal fallback may answer on any of them.
-# Order matters: longer IDs first, so "claude-opus-5" doesn't match "claude-opus-5-5".
+# where Anthropic set them lower: Fable / Mythos 5.2 and 5.1 0.025x, Opus 5.5
+# and Sonnet 5.5 0.05x.
+# Every model that isn't retired is listed: a refusal fallback may answer on any of them.
 PRICES: dict[str, Price] = {
+    "claude-fable-5-2": Price(input=8.00, output=40.00, cache_read=0.20, cache_write=10.00),
+    "claude-mythos-5-2": Price(input=8.00, output=40.00, cache_read=0.20, cache_write=10.00),
     "claude-fable-5-1": Price(input=10.00, output=50.00, cache_read=0.25, cache_write=12.50),
     "claude-mythos-5-1": Price(input=10.00, output=50.00, cache_read=0.25, cache_write=12.50),
     "claude-fable-5": Price(input=10.00, output=50.00, cache_read=1.00, cache_write=12.50),
@@ -49,14 +53,19 @@ PRICES: dict[str, Price] = {
     "claude-opus-4-8": Price(input=5.00, output=25.00, cache_read=0.50, cache_write=6.25),
     "claude-opus-4-7": Price(input=5.00, output=25.00, cache_read=0.50, cache_write=6.25),
     "claude-opus-4-6": Price(input=5.00, output=25.00, cache_read=0.50, cache_write=6.25),
-    "claude-sonnet-5-5": Price(input=2.00, output=10.00, cache_read=0.20, cache_write=2.50),
+    "claude-opus-4-5": Price(input=5.00, output=25.00, cache_read=0.50, cache_write=6.25),
+    "claude-sonnet-5-5": Price(input=2.00, output=10.00, cache_read=0.10, cache_write=2.50),
     "claude-sonnet-5": Price(input=2.00, output=10.00, cache_read=0.20, cache_write=2.50),
     "claude-sonnet-4-6": Price(input=3.00, output=15.00, cache_read=0.30, cache_write=3.75),
-    # $0.10/$0.50 up to 100K prompt tokens, $0.50/$2.50 above. Usage reaches
-    # cost_usd summed over calls, so the higher rate: may overstate, never understate.
+    "claude-sonnet-4-5": Price(input=3.00, output=15.00, cache_read=0.30, cache_write=3.75),
+    # $0.10/$0.50 (cache read $0.01) up to 100K prompt tokens, $0.50/$2.50 above.
+    # Usage reaches cost_usd summed over calls, so the higher rate: may overstate,
+    # never understate.
     "claude-haiku-5-5": Price(input=0.50, output=2.50, cache_read=0.05, cache_write=0.625),
     "claude-haiku-4-5": Price(input=1.00, output=5.00, cache_read=0.10, cache_write=1.25),
 }
+DATE_SUFFIX = re.compile(r"-\d{8}$")
+
 # An unknown model (e.g. one a refusal fallback chose) is priced at the most
 # expensive known rate: the reported cost may overstate, never understate.
 UNKNOWN_PRICE = max(PRICES.values(), key=lambda p: p.output)
@@ -155,9 +164,10 @@ class CostMeter(BaseCallbackHandler):
 
 
 def _price_for(model: str) -> Price:
-    # Responses may name a dated or fallback model; match on the known prefix.
-    for name, price in PRICES.items():
-        if model == name or model.startswith(name):
-            return price
+    # A response may name a dated snapshot ("claude-haiku-4-5-20251001"). Any
+    # other longer name is a different model: "claude-fable-5-3" is not Fable 5.
+    name = DATE_SUFFIX.sub("", model)
+    if name in PRICES:
+        return PRICES[name]
     log.warning("no price for model %r; using the highest known rate", model)
     return UNKNOWN_PRICE
