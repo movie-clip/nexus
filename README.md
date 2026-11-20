@@ -5,6 +5,8 @@ request in plain text about a project; agents explore it, change it only
 with your approval, run its configured builds and tests, and answer. You start
 every run by hand. What "done" means: `DONE.md`. The research nexus started
 from is archived in `research/archive/`; nexus has since gone its own way.
+What a run does step by step, and where its tokens go:
+`research/request-lifecycle.md`.
 
 ## Ask
 
