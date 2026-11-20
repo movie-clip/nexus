@@ -236,3 +236,78 @@ def test_a_waiting_run_refuses_a_message(project):
     start(project, graph)
     with pytest.raises(InputError, match="is waiting for a decision; answer it first"):
         resume_pipeline("t", None, open_runs_db(), graph=graph, message="Use 11f.")
+
+
+# --- a rejected batch is staged again for the next engineer ----------------------
+
+
+def reject_then(project, second_engineer, *decisions, note="use 11, not 12"):
+    orch = ScriptedOrchestrator(
+        decide("engineer", brief="Set Speed to 12f."),
+        decide("engineer", brief="Set Speed to 11f."),
+        *decisions,
+    )
+    graph = make_graph(orch, [engineer_that_edits(), second_engineer])
+    start(project, graph)
+    decision = {"decision": "reject", "note": note}
+    return resume_pipeline("t", decision, open_runs_db(), graph=graph), graph
+
+
+def test_the_next_engineer_starts_from_the_rejected_batch(project):
+    # "12f" exists only in the rejected batch, so this edit works only if it was staged again.
+    second = scripted(
+        tool_call("edit_file", file_path="/Jump.cs", old_string="12f", new_string="11f"),
+        final("Speed is now 11."),
+    )
+    result, graph = reject_then(project, second, decide("finish", answer="Speed is 11."))
+
+    assert result.status == "waiting"
+    assert "-    float Speed = 10f;" in result.waiting_for["diff"]
+    assert "+    float Speed = 11f;" in result.waiting_for["diff"]
+    assert (project / "Jump.cs").read_bytes() == ORIGINAL.encode()
+    message = second.seen_prompts[0][-1].text
+    assert message.startswith("Set Speed to 11f.\n\n<earlier_batch>")
+    assert 'the user rejected it. Their note: "use 11, not 12"' in message
+    assert "It is staged again: /Jump.cs." in message
+    assert result.state["reports"][-1]["brief"] == "Set Speed to 11f."  # the brief as it was sent
+    assert result.state["rejected"] == {}  # used once
+
+    result = resume_pipeline("t", {"decision": "approve"}, open_runs_db(), graph=graph)
+    assert (project / "Jump.cs").read_bytes() == ORIGINAL.replace("10f", "11f").encode()
+
+
+def test_an_engineer_that_changes_nothing_offers_the_rejected_batch_again(project):
+    result, _ = reject_then(project, scripted(final("It was right as it was.")), note="")
+
+    assert result.status == "waiting"
+    assert "+    float Speed = 12f;" in result.waiting_for["diff"]
+
+
+def test_a_rejected_file_that_changed_on_disk_is_not_staged_again(project):
+    orch = ScriptedOrchestrator(
+        decide("engineer", brief="b1"), decide("engineer", brief="b2"), decide("finish", answer="a")
+    )
+    second = scripted(final("Nothing to do."))
+    graph = make_graph(orch, [engineer_that_edits(), second])
+    start(project, graph)
+    (project / "Jump.cs").write_bytes(b"edited by hand\r\n")
+    result = resume_pipeline("t", {"decision": "reject"}, open_runs_db(), graph=graph)
+
+    assert result.status == "completed"  # nothing staged, so nothing to approve
+    message = second.seen_prompts[0][-1].text
+    assert "the user rejected it. They left no note." in message
+    assert "Not staged again, because the project's file changed since: /Jump.cs." in message
+    assert "It is staged again" not in message
+
+
+def test_an_approved_batch_is_not_kept_for_the_next_engineer(project):
+    orch = ScriptedOrchestrator(
+        decide("engineer", brief="b1"), decide("engineer", brief="b2"), decide("finish", answer="a")
+    )
+    second = scripted(final("Nothing more to do."))
+    graph = make_graph(orch, [engineer_that_edits(), second])
+    start(project, graph)
+    result = resume_pipeline("t", {"decision": "approve"}, open_runs_db(), graph=graph)
+
+    assert result.status == "completed"
+    assert second.seen_prompts[0][-1].text == "b2"

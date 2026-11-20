@@ -30,9 +30,11 @@ The engineer's writes are staged (``nexus.staging``): when it is done, the run
 pauses at ``approve`` and shows the whole batch as one diff. The user approves
 (``apply`` writes it to the project, or none of it if a file changed on disk since) or
 rejects with a note; either way the outcome goes back to the orchestrator as a
-report from "user". After an approval, ``verify`` runs the project's ``verify``
-commands (a compile, say) in order without asking, stopping at the first
-failure; they report as "verify" and don't use up rounds. Specialists see only
+report from "user". A rejected batch is kept in ``rejected`` and staged again
+for the next engineer dispatch, which revises it instead of starting over.
+After an approval, ``verify`` runs the project's ``verify`` commands (a
+compile, say) in order without asking, stopping at the first failure; they
+report as "verify" and don't use up rounds. Specialists see only
 their brief; the orchestrator sees every brief and report. Each specialist
 also gets the skills on its ``Role`` (``nexus.agents.skill_shelf``).
 
@@ -152,7 +154,10 @@ engineer writes them (say so in its brief) and the tester runs the narrowest \
 tests that cover the change. Don't run commands for a request that changes \
 nothing unless it asks for that.
 - After a rejection, send the engineer again with a brief that addresses the \
-user's note, or finish and explain what was proposed and why it stopped.
+user's note, or finish and explain what was proposed and why it stopped. The \
+engineer starts from its rejected batch, staged again, and is shown the note, \
+so the brief says what to change about that batch; if the whole approach was \
+wrong, tell it to undo the batch and start over.
 - Don't repeat a step that already answered the question. If a report leaves a \
 specific gap, send a narrower brief about that gap.
 - Finish when every claim you will make is backed by a report. If something is \
@@ -334,6 +339,9 @@ class TeamState(BaseState, total=False):
     follow_up: str  # set by the input, moved into request by next_turn
     brief: str
     pending: list[ChangeDict]  # the engineer's staged batch, awaiting approval
+    # The batch the user last rejected, with their note: {"batch": [...], "note": str}.
+    # Staged again for the next engineer dispatch, then cleared.
+    rejected: dict
     approval: dict  # {"decision": "approve" | "reject", "note": str}
     command: dict  # the orchestrator's pick for the tester: {"name": str, "args": {...}}
     prepared: dict  # that command checked and filled in (commands.Prepared), awaiting its run
@@ -435,6 +443,27 @@ def orchestrator_message(state: TeamState, limits: Limits, commands_text: str) -
             "and say what is still unchecked."
         )
     return "\n\n".join(parts)
+
+
+def earlier_batch_note(note: str, staged: list[str], skipped: list[str]) -> str:
+    """What the engineer is told, after its brief, about the batch the user rejected."""
+    lines = [
+        "<earlier_batch>",
+        "You staged a batch for this work earlier and the user rejected it. "
+        + (f'Their note: "{note}"' if note else "They left no note."),
+    ]
+    if staged:
+        lines.append(
+            f"It is staged again: {', '.join(staged)}. `read_file` shows your earlier versions. "
+            "Revise them to do what the brief above asks. To drop your change to a file, write "
+            "its original text back."
+        )
+    if skipped:
+        lines.append(
+            f"Not staged again, because the project's file changed since: {', '.join(skipped)}."
+        )
+    lines.append("</earlier_batch>")
+    return "\n".join(lines)
 
 
 def unified_diff(batch: list[ChangeDict]) -> str:
@@ -561,7 +590,13 @@ def build(
             agent, backend = staged_engineer(
                 state["project"], staging, model_for("engineer"), ENGINEER.prompt, limit, skills
             )
-            text, cost = run_agent(agent, state["brief"], limit)
+            message = state["brief"]
+            rejected = state.get("rejected")
+            if rejected:
+                # The engineer revises its rejected batch instead of making it anew.
+                staged, skipped = backend.restage([Change(**c) for c in rejected["batch"]])
+                message += "\n\n" + earlier_batch_note(rejected["note"], staged, skipped)
+            text, cost = run_agent(agent, message, limit)
             batch = [asdict(change) for change in backend.changes()]
         files = ", ".join(c["path"] for c in batch) or "none"
         report: Report = {
@@ -569,7 +604,7 @@ def build(
             "brief": state["brief"],
             "report": f"{text}\n\nStaged files: {files}",
         }
-        return {"reports": [report], "pending": batch, "cost_usd": cost}
+        return {"reports": [report], "pending": batch, "rejected": {}, "cost_usd": cost}
 
     def approve(state: TeamState) -> dict:
         # Nothing but the question happens here: on resume LangGraph re-runs
@@ -609,7 +644,10 @@ def build(
             "brief": "Approve the engineer's changes?",
             "report": text,
         }
-        return {"reports": [report], "pending": [], "verdict": APPLIED if written else NOT_APPLIED}
+        update: dict = {"reports": [report], "pending": []}
+        if approval["decision"] == "reject":
+            update["rejected"] = {"batch": batch, "note": approval.get("note", "")}
+        return {**update, "verdict": APPLIED if written else NOT_APPLIED}
 
     def tester(state: TeamState, config: RunnableConfig) -> dict:
         """Check the orchestrator's command and fill it in; nothing runs yet."""

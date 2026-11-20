@@ -26,6 +26,7 @@ by a demo; a live run backs it where a test can't reach the real API.
 | `run` refuses a thread id that already exists; only `resume` continues one | existing-thread test | C |
 | The engineer's edits are staged, never written directly; the run pauses with one diff for the whole batch | engineer flow tests; live run on impact (project untouched while paused) | C |
 | Approve applies the batch from a new process; reject writes nothing and passes the note on | approve/reject tests over a fresh SQLite connection; live reject | C |
+| A rejected batch is kept: the next engineer dispatch starts with it staged again (only files the project still matches) and sees the user's note; an approved batch is not kept | rejected-batch tests at the backend and through the pipeline | C, 2026-11-20 |
 | A batch is applied whole or not at all: if a file changed on disk while waiting, nothing is written and nothing is verified; if a write fails partway, the files already written are put back | all-or-nothing, failed-write and not-verified tests | C, 2026-11-20 |
 | Line endings are kept line by line, and the diff warns about ending changes it can't show | mixed-ending tests incl. a replay of a real impact file; live re-stage | C |
 | A file that isn't UTF-8 text (another encoding, binary) can't be changed: the engineer gets a tool error and the run goes on; a byte order mark is kept | not-UTF-8 tests at the backend and through the pipeline; BOM test | C, 2026-11-20 |

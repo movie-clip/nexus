@@ -47,7 +47,9 @@ request -> orchestrator -+- scout -----------------------------------+
 
   Approve writes the whole batch or none of it: if any file changed on disk
   since it was staged, nothing is written and the orchestrator is told which
-  files. Reject writes nothing and passes your note to the orchestrator.
+  files. Reject writes nothing and passes your note to the orchestrator. If it
+  sends the engineer again, the engineer starts from the rejected batch,
+  staged again, with your note, and revises it instead of redoing the work.
   Line endings are kept line by line, and the diff warns if a change would
   alter endings it can't show. Only UTF-8 text can be changed: for a file in
   another encoding, or a binary file, the engineer gets an error it can report.

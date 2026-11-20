@@ -327,3 +327,41 @@ def test_replay_of_the_real_mixed_ending_file_changes_only_the_edited_lines(tmp_
         "/// True on the landing frame.",
         "/// Not input.",
     ]
+
+
+# --- staging a rejected batch again ---------------------------------------------
+
+
+def test_restage_brings_back_edits_new_files_and_deletes(project, backend, tmp_path):
+    backend.edit("/src/A.cs", "int x = 1;", "int x = 2;")
+    backend.write("/src/B.cs", "class B {}\n")
+    backend.delete("/README.md")
+    batch = backend.changes()
+
+    again = StagedBackend(project, tmp_path / "staging-2")
+    assert again.restage(batch) == (["/README.md", "/src/A.cs", "/src/B.cs"], [])
+    assert again.changes() == batch
+    shown = again.read("/src/A.cs").file_data
+    assert shown is not None and "int x = 2;" in shown["content"]
+    assert again.read("/README.md").error is not None
+    assert raw(project / "src" / "A.cs") == CRLF_FILE.encode()  # still only staged
+
+
+def test_restage_skips_a_file_the_project_no_longer_matches(project, backend, tmp_path):
+    backend.edit("/src/A.cs", "int x = 1;", "int x = 2;")
+    backend.edit("/README.md", "hello", "hi")
+    batch = backend.changes()
+    (project / "src" / "A.cs").write_bytes(b"someone else edited this\r\n")
+    (project / "README.md").write_bytes("привет\n".encode("cp1251"))
+
+    again = StagedBackend(project, tmp_path / "staging-2")
+    assert again.restage(batch) == ([], ["/README.md", "/src/A.cs"])
+    assert again.changes() == []
+
+
+def test_a_restaged_change_is_dropped_by_writing_the_original_back(project, backend, tmp_path):
+    backend.edit("/src/A.cs", "int x = 1;", "int x = 2;")
+    again = StagedBackend(project, tmp_path / "staging-2")
+    again.restage(backend.changes())
+    again.write("/src/A.cs", CRLF_FILE.replace("\r\n", "\n"))
+    assert again.changes() == []

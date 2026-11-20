@@ -184,6 +184,30 @@ class StagedBackend(BackendProtocol):
                 batch.append(Change(path, before, after))
         return batch
 
+    def restage(self, batch: list[Change]) -> tuple[list[str], list[str]]:
+        """Stage an earlier batch again, e.g. one the user rejected, so the
+        agent revises it instead of making it anew.
+
+        A change is staged only if the project's file still holds its
+        ``before`` text. Returns (staged paths, skipped paths).
+        """
+        staged, skipped = [], []
+        for change in batch:
+            try:
+                unchanged = _read_raw(self._project_file(change.path)) == change.before
+            except UnicodeDecodeError:
+                unchanged = False
+            if not unchanged:
+                skipped.append(change.path)
+                continue
+            if change.after is None:
+                self.deleted.add(change.path)
+            else:
+                self._put(self._staged_file(change.path), change.after)
+                self.touched.add(change.path)
+            staged.append(change.path)
+        return staged, skipped
+
     # --- helpers --------------------------------------------------------------
 
     def _current_text(self, file_path: str) -> str | None:
